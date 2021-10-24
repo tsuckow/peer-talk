@@ -16,7 +16,7 @@ namespace PeerTalk
     /// <remarks>
     ///   Only targets that do match a filter will pass.
     /// </remarks>
-    public class MultiAddressBlackList : ICollection<MultiAddress>, IPolicy<MultiAddress>
+    public class MultiAddressDenyList : ICollection<MultiAddress>, IPolicy<MultiAddress>
     {
         ConcurrentDictionary<MultiAddress, MultiAddress> filters = new ConcurrentDictionary<MultiAddress, MultiAddress>();
 

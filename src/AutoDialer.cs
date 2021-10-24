@@ -140,7 +140,7 @@ namespace PeerTalk
             var peers = swarm.KnownPeers
                 .Where(p => p.ConnectedAddress == null)
                 .Where(p => p != disconnectedPeer)
-                .Where(p => swarm.IsAllowed(p))
+                //.Where(p => swarm.IsAllowed(p)) // it should not be possible for a non-allowed peer to be in KnownPeers
                 .Where(p => !swarm.HasPendingConnection(p))
                 .ToArray();
             if (peers.Length == 0)

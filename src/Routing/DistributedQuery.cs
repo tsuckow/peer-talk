@@ -220,12 +220,13 @@ namespace PeerTalk.Routing
 
             foreach (var provider in providers)
             {
-                if (provider.TryToPeer(out Peer p))
+                try
                 {
-                    if (p == Dht.Swarm.LocalPeer || !Dht.Swarm.IsAllowed(p))
+                    Peer p = Dht.Swarm.RegisterPeer(provider.MultiHash, provider.MultiAddresses);
+                    
+                    if (p == Dht.Swarm.LocalPeer)
                         continue;
 
-                    p = Dht.Swarm.RegisterPeer(p);
                     if (QueryType == MessageType.GetProviders)
                     {
                         // Only unique answers
@@ -236,6 +237,10 @@ namespace PeerTalk.Routing
                         }
                     }
                 }
+                catch (Exception) //Fixme RegisterPeer should throw a custom exception when not allowed
+                {
+                    continue;
+                }
             }
         }
 
@@ -245,16 +250,21 @@ namespace PeerTalk.Routing
                 return;
             foreach (var closer in closerPeers)
             {
-                if (closer.TryToPeer(out Peer p))
+                try
                 {
-                    if (p == Dht.Swarm.LocalPeer || !Dht.Swarm.IsAllowed(p))
+                    Peer p = Dht.Swarm.RegisterPeer(closer.MultiHash, closer.MultiAddresses);
+
+                    if (p == Dht.Swarm.LocalPeer)
                         continue;
 
-                    p = Dht.Swarm.RegisterPeer(p);
                     if (QueryType == MessageType.FindNode && QueryKey == p.Id)
                     {
                         AddAnswer(p as T);
                     }
+                }
+                catch (Exception) //Fixme RegisterPeer should throw a custom exception when not allowed
+                {
+                    continue;
                 }
             }
         }

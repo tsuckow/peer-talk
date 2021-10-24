@@ -98,14 +98,14 @@ namespace PeerTalk
                     return existing;
                 });
 
-            Swarm.BlackList.Add($"/p2p/{peer.Id}");
+            Swarm.DenyList.Add($"/p2p/{peer.Id}");
             if (dead.NextAttempt != DateTime.MaxValue)
             {
                 log.DebugFormat("Dead '{0}' for {1} minutes.", dead.Peer, dead.Backoff.TotalMinutes);
             }
             else
             {
-                Swarm.DeregisterPeer(dead.Peer);
+                Swarm.DeregisterPeer(dead.Peer.Id);
                 log.DebugFormat("Permanently dead '{0}'.", dead.Peer);
             }
         }
@@ -119,7 +119,7 @@ namespace PeerTalk
             log.DebugFormat("Alive '{0}'.", peer);
 
             DeadPeers.TryRemove(peer, out DeadPeer _);
-            Swarm.BlackList.Remove($"/p2p/{peer.Id}");
+            Swarm.DenyList.Remove($"/p2p/{peer.Id}");
         }
 
         /// <summary>
@@ -154,7 +154,7 @@ namespace PeerTalk
                         .ParallelForEachAsync(async dead =>
                         {
                             log.DebugFormat("Attempt reconnect to {0}", dead.Peer);
-                            Swarm.BlackList.Remove($"/p2p/{dead.Peer.Id}");
+                            Swarm.DenyList.Remove($"/p2p/{dead.Peer.Id}");
                             try
                             {
                                 await Swarm.ConnectAsync(dead.Peer, cancel.Token);

@@ -18,7 +18,7 @@ namespace PeerTalk.Discovery
         static ILog log = LogManager.GetLogger(typeof(Mdns));
 
         /// <inheritdoc />
-        public event EventHandler<Peer> PeerDiscovered;
+        public event EventHandler<MultiAddress> PeerDiscovered;
 
         /// <summary>
         ///  The local peer.
@@ -99,9 +99,9 @@ namespace PeerTalk.Discovery
                 var addresses = GetAddresses(msg)
                     .Where(a => a.PeerId != LocalPeer.Id)
                     .ToArray();
-                if (addresses.Length > 0)
+                foreach( var address in addresses )
                 {
-                    PeerDiscovered?.Invoke(this, new Peer { Id = addresses[0].PeerId, Addresses = addresses });
+                    PeerDiscovered?.Invoke(this, address);
                 }
             }
             catch (Exception ex)

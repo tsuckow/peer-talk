@@ -92,15 +92,10 @@ namespace PeerTalk.Multiplex
         {
             var streamId = NextStreamId;
             NextStreamId += 1;
-            var substream = new Substream
-            {
-                Id = streamId,
-                Name = name,
-                Muxer = this,
-                SentMessageType = PacketType.MessageInitiator,
-            };
 
             var substreamId = new SubstreamId(true, streamId);
+
+            var substream = new Substream(this, substreamId, name);
 
             log.Debug($"I want to create stream #{substreamId} w/ {Connection.RemotePeer.Id}");
             Substreams.TryAdd(substreamId, substream);
@@ -124,29 +119,23 @@ namespace PeerTalk.Multiplex
         /// <remarks>
         ///   Internal method called by Substream.Dispose().
         /// </remarks>
-        public async Task RemoveStreamAsync(Substream stream, CancellationToken cancel = default(CancellationToken))
+        internal void StreamDisposed(Substream stream, CancellationToken cancel = default(CancellationToken))
         {
-            //FIXME: Initiator is not known here
-            log.Error("FIXME: RemoveStreamAsync");
-
-            //var substreamId = new SubstreamId(?, stream.Id);
-            //if (Substreams.TryRemove(substreamId, out Substream _))
-            //{
-            //    // Tell the other side.
-            //    using (await AcquireWriteAccessAsync().ConfigureAwait(false))
-            //    {
-            //        var header = new Header
-            //        {
-            //            StreamId = stream.Id,
-            //            PacketType = PacketType.CloseInitiator
-            //        };
-            //        await header.WriteAsync(Channel, cancel).ConfigureAwait(false);
-            //        Channel.WriteByte(0); // length
-            //        await Channel.FlushAsync().ConfigureAwait(false);
-            //    }
-            //}
-
-            await Task.Yield();
+            log.Debug($"Closing stream #{stream.Id}:{stream.Name} w/ {Connection.RemotePeer.Id}");
+            _ = Task.Run(async () =>
+            {
+                using (await AcquireWriteAccessAsync().ConfigureAwait(false))
+                {
+                    var header = new Header
+                    {
+                        StreamId = stream.Id.Id,
+                        PacketType = stream.Id.Initiator ? PacketType.CloseInitiator : PacketType.CloseReceiver
+                    };
+                    await header.WriteAsync(Channel, cancel).ConfigureAwait(false);
+                    Channel.WriteByte(0); // length
+                    await Channel.FlushAsync().ConfigureAwait(false);
+                }
+            });
         }
 
         /// <summary>
@@ -187,21 +176,20 @@ namespace PeerTalk.Multiplex
                         case PacketType.NewStream:
                             if (substream != null)
                             {
-                                log.Warn($"Stream {substreamId} already exists");
+                                log.Error($"Stream {substreamId} already exists");
                                 continue;
                             }
-                            substream = new Substream
-                            {
-                                Id = header.StreamId,
-                                Name = Encoding.UTF8.GetString(payload),
-                                Muxer = this
-                            };
-                            log.Debug($"Asked to create stream #{substreamId} w/ {Connection.RemotePeer.Id}");
+                            substream = new Substream(this, substreamId, Encoding.UTF8.GetString(payload));
+                            log.Debug($"Asked to create stream #{substreamId}:{substream?.Name} w/ {Connection.RemotePeer.Id}");
                             if (!Substreams.TryAdd(substreamId, substream))
                             {
                                 // Should not happen.
                                 throw new Exception($"Stream {substream.Id} already exists");
                             }
+
+                            //go-ipfs might reset all substreams if we haven't initiated one. So just make one to keep around
+                            //_ = await CreateStreamAsync("KeepAlive");
+
                             SubstreamCreated?.Invoke(this, substream);
                             break;
 
@@ -231,10 +219,10 @@ namespace PeerTalk.Multiplex
                         // Hard cut, existing unread data should be discarded and sending/receiving is an error.
                         case PacketType.ResetInitiator:
                         case PacketType.ResetReceiver:
-                            log.Warn($"Asked to reset stream #{substreamId}  w/ {Connection.RemotePeer.Id}, this is usually in response to a protocol error");
+                            log.Warn($"Asked to reset stream #{substreamId}:{substream?.Name}  w/ {Connection.RemotePeer.Id}, this is usually in response to a protocol error");
                             if (substream == null)
                             {
-                                log.Warn($"Reset of unknown stream #{substreamId} w/ {Connection.RemotePeer.Id} due to {header.PacketType}");
+                                log.Error($"Reset of unknown stream #{substreamId} w/ {Connection.RemotePeer.Id} due to {header.PacketType}");
                                 continue;
                             }
                             substream.NoMoreData();

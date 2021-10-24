@@ -142,27 +142,14 @@ namespace PeerTalk.Routing
         public ConnectionType Connection { get; set; }
 
         /// <summary>
-        ///   Convert the message into a <see cref="Peer"/>.
+        /// MultiAddress representations of the addresses
         /// </summary>
-        /// <param name="peer"></param>
-        /// <returns></returns>
-        public bool TryToPeer(out Peer peer)
+        public IEnumerable<MultiAddress> MultiAddresses
         {
-            peer = null;
-
-            // Sanity checks.
-            if (Id == null || Id.Length == 0)
-                return false;
-
-            var id = new MultiHash(Id);
-            peer = new Peer
+            get
             {
-                Id = id
-            };
-            if (Addresses != null)
-            {
-                var x = new MultiAddress($"/ipfs/{id}");
-                peer.Addresses = Addresses
+                var x = new MultiAddress($"/ipfs/{MultiHash}");
+                return Addresses
                     .Select(bytes =>
                     {
                         try
@@ -179,9 +166,12 @@ namespace PeerTalk.Routing
                     .Where(a => a != null)
                     .ToArray();
             }
-
-            return true;
         }
+
+        /// <summary>
+        /// MultiHash representation of the Id
+        /// </summary>
+        public MultiHash MultiHash { get => new MultiHash(Id); }
     }
 
     /// <summary>

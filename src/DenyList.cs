@@ -9,22 +9,22 @@ using System.Threading.Tasks;
 namespace PeerTalk
 {
     /// <summary>
-    ///   A sequence of targets that are approved.
+    ///   A sequence of targets that are not approved.
     /// </summary>
     /// <typeparam name="T">
     ///   The type of object that the rule applies to.
     /// </typeparam>
     /// <remarks>
-    ///   Only targets that are defined will pass.  If no targets are defined, then anything
-    ///   passes.
+    ///   Only targets that are not defined will pass.
     /// </remarks>
-    public class WhiteList<T> : ConcurrentBag<T>, IPolicy<T>
+    public class DenyList<T> : ConcurrentBag<T>, IPolicy<T>
         where T : IEquatable<T>
     {
         /// <inheritdoc />
         public bool IsAllowed(T target)
         {
-            return this.IsEmpty || this.Contains(target);
+            return !this.Contains(target);
         }
+
     }
 }

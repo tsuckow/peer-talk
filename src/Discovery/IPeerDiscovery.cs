@@ -19,10 +19,9 @@ namespace PeerTalk.Discovery
         ///   Raised when a peer is discovered.
         /// </summary>
         /// <remarks>
-        ///   The peer must contain at least one <see cref="MultiAddress"/>.
         ///   The address must end with the ipfs protocol and the public ID
         ///   of the peer.  For example "/ip4/104.131.131.82/tcp/4001/ipfs/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ"
         /// </remarks>
-        event EventHandler<Peer> PeerDiscovered;
+        event EventHandler<MultiAddress> PeerDiscovered;
     }
 }

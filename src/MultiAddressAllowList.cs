@@ -17,7 +17,7 @@ namespace PeerTalk
     ///   Only targets that are a subset of any filters will pass.  If no filters are defined, then anything
     ///   passes.
     /// </remarks>
-    public class MultiAddressWhiteList : ICollection<MultiAddress>, IPolicy<MultiAddress>
+    public class MultiAddressAllowList : ICollection<MultiAddress>, IPolicy<MultiAddress>
     {
         ConcurrentDictionary<MultiAddress, MultiAddress> filters = new ConcurrentDictionary<MultiAddress, MultiAddress>();
 

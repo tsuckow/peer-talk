@@ -31,21 +31,9 @@ namespace PeerTalk.Multiplex
         Stream outStream = new MemoryStream();
 
         /// <summary>
-        ///   The type of message of sent to the other side.
-        /// </summary>
-        /// <value>
-        ///   Either <see cref="PacketType.MessageInitiator"/> or <see cref="PacketType.MessageReceiver"/>.
-        ///   Defaults to <see cref="PacketType.MessageReceiver"/>.
-        /// </value>
-        public PacketType SentMessageType = PacketType.MessageReceiver;
-
-        /// <summary>
         ///   The stream identifier.
         /// </summary>
-        /// <value>
-        ///   The session initiator allocates odd IDs and the session receiver allocates even IDs.
-        /// </value>
-        public UInt64 Id;
+        internal SubstreamId Id { get; private set; }
         
         /// <summary>
         ///   A name for the stream.
@@ -53,12 +41,12 @@ namespace PeerTalk.Multiplex
         /// <value>
         ///   Names do not need to be unique.
         /// </value>
-        public string Name;
+        internal string Name { get; private set; }
 
         /// <summary>
         ///   The multiplexor associated with the substream.
         /// </summary>
-        public Muxer Muxer { get; set; }
+        private Muxer Muxer { get; set; }
 
         /// <inheritdoc />
         public override bool CanRead => !eos;
@@ -80,6 +68,13 @@ namespace PeerTalk.Multiplex
         {
             get => throw new NotSupportedException();
             set => throw new NotSupportedException();
+        }
+
+        internal Substream(Muxer muxer, SubstreamId id, string name = "")
+        {
+            Muxer = muxer;
+            Id = id;
+            Name = name;
         }
 
         /// <inheritdoc />
@@ -104,7 +99,7 @@ namespace PeerTalk.Multiplex
         ///   <b>AddData</b> is called when the muxer receives a packet for this
         ///   stream.
         /// </remarks>
-        public void AddData(byte[] data)
+        internal void AddData(byte[] data)
         {
             inBlocks.Post(data);
         }
@@ -184,8 +179,8 @@ namespace PeerTalk.Multiplex
                 outStream.Position = 0;
                 var header = new Header
                 {
-                    StreamId = Id,
-                    PacketType = SentMessageType
+                    StreamId = Id.Id,
+                    PacketType = Id.Initiator ? PacketType.MessageInitiator : PacketType.MessageReceiver
                 };
                 await header.WriteAsync(Muxer.Channel, cancel).ConfigureAwait(false);
                 await Varint.WriteVarintAsync(Muxer.Channel, outStream.Length, cancel).ConfigureAwait(false);
@@ -221,7 +216,7 @@ namespace PeerTalk.Multiplex
         {
             if (disposing)
             {
-                Muxer?.RemoveStreamAsync(this);
+                Muxer?.StreamDisposed(this);
 
                 eos = true;
                 if (outStream != null)

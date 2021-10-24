@@ -21,7 +21,7 @@ namespace PeerTalk
     /// <summary>
     ///   Manages communication with other peers.
     /// </summary>
-    public class Swarm : IService, IPolicy<MultiAddress>, IPolicy<Peer>
+    public class Swarm : IService
     {
         static ILog log = LogManager.GetLogger(typeof(Swarm));
 
@@ -127,9 +127,9 @@ namespace PeerTalk
         public Key LocalPeerKey { get; set; }
 
         /// <summary>
-        ///   Other nodes. Key is the bae58 hash of the peer ID.
+        ///   List of other known peers.
         /// </summary>
-        ConcurrentDictionary<string, Peer> otherPeers = new ConcurrentDictionary<string, Peer>();
+        PeerList otherPeers;
 
         /// <summary>
         ///   Used to cancel any task when the swarm is stopped.
@@ -189,7 +189,7 @@ namespace PeerTalk
             get
             {
                 return otherPeers
-                    .Values
+                    .Peers
                     .SelectMany(p => p.Addresses);
             }
         }
@@ -206,8 +206,25 @@ namespace PeerTalk
         {
             get
             {
-                return otherPeers.Values;
+                return otherPeers.Peers;
             }
+        }
+
+        /// <summary>
+        ///   Instantiate the Swarm
+        /// </summary>
+        public Swarm(Peer localPeer, PeerList peerList)
+        {
+            if (localPeer == null)
+                throw new ArgumentNullException();
+            if (localPeer.Id == null)
+                throw new ArgumentNullException("peer.Id");
+            if (localPeer.PublicKey == null)
+                throw new ArgumentNullException("peer.PublicKey");
+            if (!localPeer.IsValid())
+                throw new ArgumentException("Invalid peer.");
+            LocalPeer = localPeer;
+            otherPeers = peerList;
         }
 
         /// <summary>
@@ -220,42 +237,38 @@ namespace PeerTalk
         ///   The <see cref="Peer"/> that is registered.
         /// </returns>
         /// <exception cref="Exception">
-        ///   The <see cref="BlackList"/> or <see cref="WhiteList"/> policies forbid it.
+        ///   The <see cref="PeerList.DenyList"/> or <see cref="PeerList.AllowList"/> policies forbid it.
         ///   Or the "p2p/ipfs" protocol name is missing.
         /// </exception>
         /// <remarks>
         ///   If the <paramref name="address"/> is not already known, then it is
         ///   added to the <see cref="KnownPeerAddresses"/>.
         /// </remarks>
-        /// <seealso cref="RegisterPeer(Peer)"/>
+        /// <seealso cref="RegisterPeer(MultiHash, IEnumerable{MultiAddress})"/>
         public Peer RegisterPeerAddress(MultiAddress address)
         {
-            var peer = new Peer
-            {
-                Id = address.PeerId,
-                Addresses = new List<MultiAddress> { address }
-            };
-
-            return RegisterPeer(peer);
+            return RegisterPeer(address.PeerId, new[] { address });
         }
 
         /// <summary>
         ///   Register that a peer has been discovered.
         /// </summary>
-        /// <param name="peer">
+        /// <param name="id">
         ///   The newly discovered peer.
+        /// </param>
+        /// <param name="addresses">
+        ///   Any known addresses for the peer.
         /// </param>
         /// <returns>
         ///   The registered peer.
         /// </returns>
         /// <remarks>
         ///   If the peer already exists, then the existing peer is updated with supplied
-        ///   information and is then returned.  Otherwise, the <paramref name="peer"/>
+        ///   information and is then returned.  Otherwise, the <paramref name="id"/>
         ///   is added to known peers and is returned.
         ///   <para>
         ///   If the peer already exists, then a union of the existing and new addresses
-        ///   is used.  For all other information the <paramref name="peer"/>'s information
-        ///   is used if not <b>null</b>.
+        ///   is used.
         ///   </para>
         ///   <para>
         ///   If peer does not already exist, then the <see cref="PeerDiscovered"/> event
@@ -263,80 +276,48 @@ namespace PeerTalk
         ///   </para>
         /// </remarks>
         /// <exception cref="Exception">
-        ///   The <see cref="BlackList"/> or <see cref="WhiteList"/> policies forbid it.
+        ///   The <see cref="PeerList.DenyList"/> or <see cref="PeerList.AllowList"/> policies forbid it.
         /// </exception>
-        public Peer RegisterPeer(Peer peer)
+        public Peer RegisterPeer(MultiHash id, IEnumerable<MultiAddress> addresses = null)
         {
-            if (peer.Id == null)
-            {
-                throw new ArgumentNullException("peer.ID");
-            }
-            if (peer.Id == LocalPeer.Id)
-            {
-                throw new ArgumentException("Cannot register self.");
-            }
-            if (!IsAllowed(peer))
-            {
-                throw new Exception($"Communication with '{peer}' is not allowed.");
-            }
-
-            var isNew = false;
-            var p = otherPeers.AddOrUpdate(peer.Id.ToBase58(),
-                (id) =>
-                {
-                    isNew = true;
-                    return peer;
-                },
-                (id, existing) =>
-                {
-                    if (!Object.ReferenceEquals(existing, peer))
-                    {
-                        existing.AgentVersion = peer.AgentVersion ?? existing.AgentVersion;
-                        existing.ProtocolVersion = peer.ProtocolVersion ?? existing.ProtocolVersion;
-                        existing.PublicKey = peer.PublicKey ?? existing.PublicKey;
-                        existing.Latency = peer.Latency ?? existing.Latency;
-                        existing.Addresses = existing
-                            .Addresses
-                            .Union(peer.Addresses)
-                            .ToList();
-                    }
-                    return existing;
-                });
+            var isNew = otherPeers.RegisterPeer(id, out Peer peer, addresses);
 
             if (isNew)
             {
                 if (log.IsDebugEnabled)
                 {
-                    log.Debug($"New peer registerd {p}");
+                    log.Debug($"New peer registerd {peer}");
                 }
-                PeerDiscovered?.Invoke(this, p);
+                PeerDiscovered?.Invoke(this, peer);
             }
 
-            return p;
+            return peer;
         }
 
         /// <summary>
         ///   Deregister a peer.
         /// </summary>
-        /// <param name="peer">
+        /// <param name="id">
         ///   The peer to remove..
         /// </param>
         /// <remarks>
         ///   Remove all knowledge of the peer. The <see cref="PeerRemoved"/> event
         ///   is raised.
         /// </remarks>
-        public void DeregisterPeer(Peer peer)
+        public bool DeregisterPeer(MultiHash id)
         {
-            if (peer.Id == null)
+            if (id == null)
             {
-                throw new ArgumentNullException("peer.ID");
+                throw new ArgumentNullException(nameof(id));
             }
 
-            if (otherPeers.TryRemove(peer.Id.ToBase58(), out Peer found))
+            otherPeers.RemovePeer(id, out Peer found);
+            if(found != null)
             {
-                peer = found;
+                PeerRemoved?.Invoke(this, found);
+                return true;
             }
-            PeerRemoved?.Invoke(this, peer);
+            return false;
         }
 
         /// <summary>
@@ -356,12 +337,12 @@ namespace PeerTalk
         /// <summary>
         ///   The addresses that cannot be used.
         /// </summary>
-        public MultiAddressBlackList BlackList { get; set; } = new MultiAddressBlackList();
+        public MultiAddressDenyList DenyList { get => otherPeers.DenyList; }
 
         /// <summary>
         ///   The addresses that can be used.
         /// </summary>
-        public MultiAddressWhiteList WhiteList { get; set; } = new MultiAddressWhiteList();
+        public MultiAddressAllowList AllowList { get => otherPeers.AllowList; }
 
         /// <inheritdoc />
         public Task StartAsync()
@@ -398,11 +379,7 @@ namespace PeerTalk
 
         void OnPeerDisconnected(object sender, MultiHash peerId)
         {
-            if (!otherPeers.TryGetValue(peerId.ToBase58(), out Peer peer))
-            {
-                peer = new Peer { Id = peerId };
-            }
-            PeerDisconnected?.Invoke(this, peer);
+            PeerDisconnected?.Invoke(this, RegisterPeer(peerId));
         }
 
         /// <inheritdoc />
@@ -427,8 +404,6 @@ namespace PeerTalk
             listeners.Clear();
             pendingConnections.Clear();
             pendingRemoteConnections.Clear();
-            BlackList = new MultiAddressBlackList();
-            WhiteList = new MultiAddressWhiteList();
 
             log.Debug($"Stopped {LocalPeer}");
         }
@@ -482,8 +457,6 @@ namespace PeerTalk
                 throw new Exception("The swarm is not running.");
             }
 
-            peer = RegisterPeer(peer);
-
             // If connected and still open, then use the existing connection.
             if (Manager.TryGet(peer, out PeerConnection conn))
             {
@@ -535,7 +508,7 @@ namespace PeerTalk
         /// </remarks>
         public async Task<Stream> DialAsync(Peer peer, string protocol, CancellationToken cancel = default(CancellationToken))
         {
-            peer = RegisterPeer(peer);
+            peer = RegisterPeer(peer.Id);
 
             // Get a connection and then a muxer to the peer.
             var connection = await ConnectAsync(peer, cancel).ConfigureAwait(false);
@@ -940,7 +913,7 @@ namespace PeerTalk
                 }
                 connection.RemotePeer = await identify.GetRemotePeerAsync(connection, default(CancellationToken)).ConfigureAwait(false);
 
-                connection.RemotePeer = RegisterPeer(connection.RemotePeer);
+                connection.RemotePeer = RegisterPeer(connection.RemotePeer.Id);
                 connection.RemoteAddress = new MultiAddress($"{remote}/ipfs/{connection.RemotePeer.Id}");
                 var actual = Manager.Add(connection);
                 if (actual == connection)
@@ -1058,19 +1031,5 @@ namespace PeerTalk
                 log.Error("stop listening failed", e);
             }
         }
-
-        /// <inheritdoc />
-        public bool IsAllowed(MultiAddress target)
-        {
-            return BlackList.IsAllowed(target)
-                && WhiteList.IsAllowed(target);
-        }
-
-        /// <inheritdoc />
-        public bool IsAllowed(Peer peer)
-        {
-            return peer.Addresses.All(a => IsAllowed(a));
-        }
-
     }
 }

@@ -12,7 +12,8 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-
+using Alethic.Kademlia;
+using Microsoft.Extensions.Options;
 
 namespace PeerTalk.Routing
 {
@@ -63,6 +64,8 @@ namespace PeerTalk.Routing
         {
             return $"/{Name}/{Version}";
         }
+
+        //private KFixedTableRouter<KNodeId256> Router = new KFixedTableRouter<KNodeId256>(Options.Create(new KFixedTableRouterOptions()), Swarm.);
 
         /// <inheritdoc />
         public async Task ProcessMessageAsync(PeerConnection connection, Stream stream, CancellationToken cancel = default(CancellationToken))
@@ -221,7 +224,7 @@ namespace PeerTalk.Routing
                 {
                     return (pid == Swarm.LocalPeer.Id)
                         ? Swarm.LocalPeer
-                        : Swarm.RegisterPeer(new Peer { Id = pid });
+                        : Swarm.RegisterPeer(pid);
                 });
             foreach (var provider in providers)
             {
@@ -368,7 +371,7 @@ namespace PeerTalk.Routing
                 {
                     var peer = (pid == Swarm.LocalPeer.Id)
                          ? Swarm.LocalPeer
-                         : Swarm.RegisterPeer(new Peer { Id = pid });
+                         : Swarm.RegisterPeer(pid);
                     return new DhtPeerMessage
                     {
                         Id = peer.Id.ToArray(),
@@ -402,14 +405,12 @@ namespace PeerTalk.Routing
                 return null;
             }
             var providers = request.ProviderPeers
-                .Select(p => p.TryToPeer(out Peer peer) ? peer : (Peer)null)
+                .Select(p => Swarm.RegisterPeer(p.MultiHash, p.MultiAddresses))
                 .Where(p => p != null)
                 .Where(p => p == remotePeer)
-                .Where(p => p.Addresses.Count() > 0)
-                .Where(p => Swarm.IsAllowed(p));
+                .Where(p => p.Addresses.Count() > 0);
             foreach (var provider in providers)
             {
-                Swarm.RegisterPeer(provider);
                 ContentRouter.Add(cid, provider.Id);
             };
 

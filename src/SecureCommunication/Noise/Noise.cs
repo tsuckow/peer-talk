@@ -114,38 +114,46 @@ namespace PeerTalk.SecureCommunication.Noise
                         }
                         else
                         {
-                            {
-                                var received = await ReadStreamMessageAsync(stream, streambuffer, Protocol.MaxMessageLength);
-                                var (_, _, _) = state.ReadMessage(new ReadOnlySpan<byte>(streambuffer, 0, received), plaintextbuffer);
-                            }
-
-                            // Send second step in handshake
-                            var myPayload = GeneratePayload(connection, state, kp.PublicKey);
-
-                            using (var outgoingstream = new MemoryStream(plaintextbuffer, 0, Protocol.MaxMessageLength, writable: true))
-                            {
-                                ProtoBuf.Serializer.Serialize(outgoingstream, myPayload);
-                                var (bytesWritten, _, _) = state.WriteMessage(new ReadOnlySpan<byte>(plaintextbuffer, 0, Convert.ToInt32(outgoingstream.Position)), streambuffer);
-                                await WriteStreamMessageAsync(stream, streambuffer, bytesWritten);
-                            }
-
-                            // Receive the third handshake message from the server.
-                            {
-                                var received = await ReadStreamMessageAsync(stream, streambuffer, Protocol.MaxMessageLength);
-                                var (bytesRead, _, transport) = state.ReadMessage(new ReadOnlySpan<byte>(streambuffer, 0, received), plaintextbuffer);
-
-                                using (var incomingstream = new MemoryStream(plaintextbuffer, 0, bytesRead, writable: false))
+                            try {
                                 {
-                                    var peerPayload = ProtoBuf.Serializer.Deserialize<NoiseHandshakePayload>(incomingstream);
-                                    ValidatePayload(connection, state, peerPayload);
+                                    var received = await ReadStreamMessageAsync(stream, streambuffer, Protocol.MaxMessageLength);
+                                    var (_, _, _) = state.ReadMessage(new ReadOnlySpan<byte>(streambuffer, 0, received), plaintextbuffer);
                                 }
 
-                                log.Info($"Validated incoming peer identity with Noise Protocol: {connection.RemotePeer.Id}");
+                                // Send second step in handshake
+                                var myPayload = GeneratePayload(connection, state, kp.PublicKey);
 
-                                var secureStream = new NoiseStream(transport, stream);
-                                connection.Stream = secureStream;
-                                connection.SecurityEstablished.SetResult(true);
-                                return secureStream;
+                                using (var outgoingstream = new MemoryStream(plaintextbuffer, 0, Protocol.MaxMessageLength, writable: true))
+                                {
+                                    ProtoBuf.Serializer.Serialize(outgoingstream, myPayload);
+                                    log.Error($"Lengths: {outgoingstream.Length} {outgoingstream.Position}");
+                                    var (bytesWritten, _, _) = state.WriteMessage(new ReadOnlySpan<byte>(plaintextbuffer, 0, Convert.ToInt32(outgoingstream.Position)), streambuffer);
+                                    await WriteStreamMessageAsync(stream, streambuffer, bytesWritten);
+                                }
+
+                                // Receive the third handshake message from the server.
+                                {
+                                    var received = await ReadStreamMessageAsync(stream, streambuffer, Protocol.MaxMessageLength);
+                                    var (bytesRead, _, transport) = state.ReadMessage(new ReadOnlySpan<byte>(streambuffer, 0, received), plaintextbuffer);
+
+                                    using (var incomingstream = new MemoryStream(plaintextbuffer, 0, bytesRead, writable: false))
+                                    {
+                                        var peerPayload = ProtoBuf.Serializer.Deserialize<NoiseHandshakePayload>(incomingstream);
+                                        ValidatePayload(connection, state, peerPayload);
+                                    }
+
+                                    log.Info($"Validated incoming peer identity with Noise Protocol: {connection.RemotePeer.Id}");
+
+                                    var secureStream = new NoiseStream(transport, stream);
+                                    connection.Stream = secureStream;
+                                    connection.SecurityEstablished.SetResult(true);
+                                    return secureStream;
+                                }
+                            }
+                            catch (Exception e)
+                            {
+                                log.Error($"Something incoming failed {e.Message}", e);
+                                throw;
                             }
                         }
                     }
