@@ -1,5 +1,6 @@
 ﻿using Common.Logging;
 using Ipfs;
+using PeerTalk.Protocols;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -19,12 +20,12 @@ namespace PeerTalk
         /// <summary>
         ///   Instantiate a PeerList
         /// </summary>
-        public PeerList(MultiHash selfId)
+        public PeerList(Peer localPeer)
         {
-            SelfId = selfId;
+            LocalPeer = localPeer;
         }
 
-        private readonly MultiHash SelfId;
+        private readonly Peer LocalPeer;
 
         /// <summary>
         ///   The addresses that cannot be used.
@@ -47,7 +48,27 @@ namespace PeerTalk
         public IEnumerable<Peer> Peers { get => otherPeers.Values; }
 
         /// <summary>
+        ///   Returns a peer instance for a given multihash, if it isn't a known peer it is registered
+        ///   
+        ///   Resolving the local peer (ourselves) is permitted
+        /// </summary>
+        public Peer ResolvePeer(MultiHash id)
+        {
+            if (id == LocalPeer.Id)
+            {
+                return LocalPeer;
+            }
+            else
+            {
+                RegisterPeer(id, out Peer peer);
+                return peer;
+            }
+        }
+
+        /// <summary>
         ///   Locates or creates a peer, merging addresses
+        ///   
+        ///   Registering the local peer (ourselves) is not permitted
         /// </summary>
         public bool RegisterPeer(MultiHash id, out Peer peer, IEnumerable<MultiAddress> addresses = null)
         {
@@ -55,7 +76,7 @@ namespace PeerTalk
             {
                 throw new ArgumentNullException(nameof(id));
             }
-            if (id == SelfId)
+            if (id == LocalPeer.Id)
             {
                 throw new ArgumentException("Cannot register self.");
             }
@@ -118,6 +139,86 @@ namespace PeerTalk
         public void Clear()
         {
             otherPeers.Clear();
+        }
+
+        /// <summary>
+        ///  The supported protocols.
+        /// </summary>
+        /// <remarks>
+        ///   Use sychronized access, e.g. <code>lock (protocols) { ... }</code>.
+        /// </remarks>
+        List<IPeerProtocol> protocols = new List<IPeerProtocol>
+        {
+            new Multistream1(),
+            new SecureCommunication.Noise.Noise(),
+            new SecureCommunication.Secio1(),
+            new Identify1(),
+            new Mplex67()
+        };
+
+        /// <summary>
+        ///   Gets the registered encryption protocols
+        /// </summary>
+        public IEnumerable<IEncryptionProtocol> EncryptionProtocols
+        {
+            get
+            {
+                lock (protocols)
+                {
+                    return protocols.OfType<IEncryptionProtocol>().ToArray();
+                }
+            }
+        }
+
+        /// <summary>
+        ///   Gets the registered Identity protocol
+        /// </summary>
+        public Identify1 IdentifyProtocol { get
+            {
+                lock (protocols)
+                {
+                    return protocols.OfType<Identify1>().First();
+                }
+            }
+        }
+
+        /// <summary>
+        ///   Add a protocol that is supported by the swarm.
+        /// </summary>
+        /// <param name="protocol">
+        ///   The protocol to add.
+        /// </param>
+        public void AddProtocol(IPeerProtocol protocol)
+        {
+            lock (protocols)
+            {
+                protocols.Add(protocol);
+            }
+        }
+
+        /// <summary>
+        ///   Remove a protocol from the swarm.
+        /// </summary>
+        /// <param name="protocol">
+        ///   The protocol to remove.
+        /// </param>
+        public void RemoveProtocol(IPeerProtocol protocol)
+        {
+            lock (protocols)
+            {
+                protocols.Remove(protocol);
+            }
+        }
+
+        /// <summary>
+        ///   Adds Protocols to a connection
+        /// </summary>
+        public void MountProtocols(PeerConnection connection)
+        {
+            lock (protocols)
+            {
+                connection.AddProtocols(protocols);
+            }
         }
     }
 }

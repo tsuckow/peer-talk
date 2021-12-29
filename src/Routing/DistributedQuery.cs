@@ -14,10 +14,7 @@ namespace PeerTalk.Routing
     /// <summary>
     ///   A query that is sent to multiple peers.
     /// </summary>
-    /// <typeparam name="T">
-    ///  The type of answer returned by a peer.
-    /// </typeparam>
-    public class DistributedQuery<T> where T : class
+    public class DistributedQuery
     {
         static ILog log = LogManager.GetLogger("PeerTalk.Routing.DistributedQuery");
         static int nextQueryId = 1;
@@ -44,14 +41,14 @@ namespace PeerTalk.Routing
         CancellationTokenSource runningQuery;
 
         ConcurrentDictionary<Peer, Peer> visited = new ConcurrentDictionary<Peer, Peer>();
-        ConcurrentDictionary<T, T> answers = new ConcurrentDictionary<T, T>();
+        ConcurrentDictionary<Peer, Peer> answers = new ConcurrentDictionary<Peer, Peer>();
         DhtMessage queryMessage;
         int failedConnects = 0;
 
         /// <summary>
         ///   Raised when an answer is obtained.
         /// </summary>
-        public event EventHandler<T> AnswerObtained;
+        public event EventHandler<Peer> AnswerObtained;
 
         /// <summary>
         ///   The unique identifier of the query.
@@ -61,7 +58,7 @@ namespace PeerTalk.Routing
         /// <summary>
         ///   The received answers for the query.
         /// </summary>
-        public IEnumerable<T> Answers
+        public IEnumerable<Peer> Answers
         {
             get
             {
@@ -93,7 +90,7 @@ namespace PeerTalk.Routing
         /// <summary>
         ///   The distributed hash table.
         /// </summary>
-        public Dht1 Dht { get; set; }
+        internal Dht1 Dht { get; set; }
 
         /// <summary>
         ///   The type of query to perform.
@@ -185,7 +182,7 @@ namespace PeerTalk.Routing
                 {
                     using (var timeout = new CancellationTokenSource(askTime))
                     using (var cts = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token, runningQuery.Token))
-                    using (var stream = await Dht.Swarm.DialAsync(peer, Dht.ToString(), cts.Token).ConfigureAwait(false))
+                    using (var stream = await Dht.Switchboard.DialAsync(peer, Dht.ToString(), cts.Token).ConfigureAwait(false))
                     {
                         // Send the KAD query and get a response.
                         ProtoBuf.Serializer.SerializeWithLengthPrefix(stream, queryMessage, PrefixStyle.Base128);
@@ -222,15 +219,11 @@ namespace PeerTalk.Routing
             {
                 try
                 {
-                    Peer p = Dht.Swarm.RegisterPeer(provider.MultiHash, provider.MultiAddresses);
-                    
-                    if (p == Dht.Swarm.LocalPeer)
-                        continue;
-
+                    Dht.OtherPeers.RegisterPeer(provider.MultiHash, out Peer p, provider.MultiAddresses);
                     if (QueryType == MessageType.GetProviders)
                     {
                         // Only unique answers
-                        var answer = p as T;
+                        var answer = p;
                         if (!answers.ContainsKey(answer))
                         {
                             AddAnswer(answer);
@@ -252,14 +245,11 @@ namespace PeerTalk.Routing
             {
                 try
                 {
-                    Peer p = Dht.Swarm.RegisterPeer(closer.MultiHash, closer.MultiAddresses);
-
-                    if (p == Dht.Swarm.LocalPeer)
-                        continue;
+                    Dht.OtherPeers.RegisterPeer(closer.MultiHash, out Peer p, closer.MultiAddresses);
 
                     if (QueryType == MessageType.FindNode && QueryKey == p.Id)
                     {
-                        AddAnswer(p as T);
+                        AddAnswer(p);
                     }
                 }
                 catch (Exception) //Fixme RegisterPeer should throw a custom exception when not allowed
@@ -277,7 +267,7 @@ namespace PeerTalk.Routing
         /// </param>
         /// <remarks>
         /// </remarks>
-        public void AddAnswer(T answer)
+        public void AddAnswer(Peer answer)
         {
             if (answer == null)
                 return;

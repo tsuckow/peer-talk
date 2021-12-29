@@ -21,9 +21,9 @@ namespace PeerTalk
     /// <summary>
     ///   Manages communication with other peers.
     /// </summary>
-    public class Swarm : IService
+    public class Swarm
     {
-        static ILog log = LogManager.GetLogger(typeof(Swarm));
+        static readonly ILog log = LogManager.GetLogger(typeof(Swarm));
 
         /// <summary>
         ///   The time to wait for a low level connection to be established.
@@ -31,22 +31,7 @@ namespace PeerTalk
         /// <value>
         ///   Defaults to 30 seconds.
         /// </value>
-        public TimeSpan TransportConnectionTimeout = TimeSpan.FromSeconds(30);
-
-        /// <summary>
-        ///  The supported protocols.
-        /// </summary>
-        /// <remarks>
-        ///   Use sychronized access, e.g. <code>lock (protocols) { ... }</code>.
-        /// </remarks>
-        List<IPeerProtocol> protocols = new List<IPeerProtocol>
-        {
-            new Multistream1(),
-            new SecureCommunication.Noise.Noise(),
-            new SecureCommunication.Secio1(),
-            new Identify1(),
-            new Mplex67()
-        };
+        public TimeSpan TransportConnectionTimeout = TimeSpan.FromSeconds(30);   
 
         /// <summary>
         ///   Added to connection protocols when needed.
@@ -56,18 +41,14 @@ namespace PeerTalk
         Peer localPeer;
 
         /// <summary>
-        ///   Raised when a listener is establihed.
-        /// </summary>
-        /// <remarks>
-        ///   Raised when <see cref="StartListeningAsync(MultiAddress)"/>
-        ///   succeeds.
-        /// </remarks>
-        public event EventHandler<Peer> ListenerEstablished;
-
-        /// <summary>
         ///   Raised when a connection to another peer is established.
         /// </summary>
         public event EventHandler<PeerConnection> ConnectionEstablished;
+
+        void OnConnectionEstablished(object sender, PeerConnection connection)
+        {
+            ConnectionEstablished.Invoke(sender, connection);
+        }
 
         /// <summary>
         ///   Raised when a new peer is discovered for the first time.
@@ -94,6 +75,11 @@ namespace PeerTalk
         /// </summary>
         public event EventHandler<Peer> PeerNotReachable;
 
+        void OnPeerNotReachable(object sender, Peer peer)
+        {
+            PeerNotReachable.Invoke(sender, peer);
+        }
+
         /// <summary>
         ///  The local peer.
         /// </summary>
@@ -119,62 +105,16 @@ namespace PeerTalk
         }
 
         /// <summary>
-        ///   The private key of the local peer.
-        /// </summary>
-        /// <value>
-        ///   Used to prove the identity of the <see cref="LocalPeer"/>.
-        /// </value>
-        public Key LocalPeerKey { get; set; }
-
-        /// <summary>
         ///   List of other known peers.
         /// </summary>
         PeerList otherPeers;
 
         /// <summary>
-        ///   Used to cancel any task when the swarm is stopped.
-        /// </summary>
-        CancellationTokenSource swarmCancellation;
-
-        /// <summary>
-        ///  Outstanding connection tasks initiated by the local peer.
-        /// </summary>
-        ConcurrentDictionary<Peer, AsyncLazy<PeerConnection>> pendingConnections = new ConcurrentDictionary<Peer, AsyncLazy<PeerConnection>>();
-
-        /// <summary>
-        ///  Outstanding connection tasks initiated by a remote peer.
-        /// </summary>
-        ConcurrentDictionary<MultiAddress, object> pendingRemoteConnections = new ConcurrentDictionary<MultiAddress, object>();
-
-        /// <summary>
-        ///   Manages the swarm's peer connections.
-        /// </summary>
-        public ConnectionManager Manager = new ConnectionManager();
-
-        /// <summary>
         ///   Use to find addresses of a peer.
         /// </summary>
-        public IPeerRouting Router { get; set; }
+        private readonly IPeerRouting Router;
 
-        /// <summary>
-        ///   Provides access to a private network of peers.
-        /// </summary>
-        public INetworkProtector NetworkProtector { get; set; }
-
-        /// <summary>
-        ///   Determines if the swarm has been started.
-        /// </summary>
-        /// <value>
-        ///   <b>true</b> if the swarm has started; otherwise, <b>false</b>.
-        /// </value>
-        /// <seealso cref="StartAsync"/>
-        /// <seealso cref="StopAsync"/>
-        public bool IsRunning { get; private set; }
-
-        /// <summary>
-        ///   Cancellation tokens for the listeners.
-        /// </summary>
-        ConcurrentDictionary<MultiAddress, CancellationTokenSource> listeners = new ConcurrentDictionary<MultiAddress, CancellationTokenSource>();
+        private readonly Switchboard Switchboard;
 
         /// <summary>
         ///   Get the sequence of all known peer addresses.
@@ -213,7 +153,7 @@ namespace PeerTalk
         /// <summary>
         ///   Instantiate the Swarm
         /// </summary>
-        public Swarm(Peer localPeer, PeerList peerList)
+        public Swarm(Peer localPeer, PeerList peerList, Switchboard switchboard, IPeerRouting router)
         {
             if (localPeer == null)
                 throw new ArgumentNullException();
@@ -225,6 +165,11 @@ namespace PeerTalk
                 throw new ArgumentException("Invalid peer.");
             LocalPeer = localPeer;
             otherPeers = peerList;
+            Switchboard = switchboard;
+            Router = router;
+
+            Switchboard.ConnectionEstablished += OnConnectionEstablished;
+            Switchboard.PeerNotReachable += OnPeerNotReachable;
         }
 
         /// <summary>
@@ -331,7 +276,7 @@ namespace PeerTalk
         /// </returns>
         public bool HasPendingConnection(Peer peer)
         {
-            return pendingConnections.TryGetValue(peer, out AsyncLazy<PeerConnection> _);
+            return Switchboard.HasPendingConnection(peer);
         }
 
         /// <summary>
@@ -344,68 +289,9 @@ namespace PeerTalk
         /// </summary>
         public MultiAddressAllowList AllowList { get => otherPeers.AllowList; }
 
-        /// <inheritdoc />
-        public Task StartAsync()
-        {
-            if (LocalPeer == null)
-            {
-                throw new NotSupportedException("The LocalPeer is not defined.");
-            }
-
-            // Many of the unit tests do not setup the LocalPeerKey.  If
-            // its missing, then just use plaintext connection.
-            // TODO: make the tests setup the security protocols.
-            if (LocalPeerKey == null)
-            {
-                lock (protocols)
-                {
-                    var security = protocols.OfType<IEncryptionProtocol>().ToArray();
-                    foreach (var p in security)
-                    {
-                        protocols.Remove(p);
-                    }
-                    protocols.Add(plaintext1);
-                }
-                log.Warn("Peer key is missing, using unencrypted connections.");
-            }
-
-            Manager.PeerDisconnected += OnPeerDisconnected;
-            IsRunning = true;
-            swarmCancellation = new CancellationTokenSource();
-            log.Debug("Started");
-
-            return Task.CompletedTask;
-        }
-
         void OnPeerDisconnected(object sender, MultiHash peerId)
         {
             PeerDisconnected?.Invoke(this, RegisterPeer(peerId));
-        }
-
-        /// <inheritdoc />
-        public async Task StopAsync()
-        {
-            IsRunning = false;
-            swarmCancellation?.Cancel(true);
-
-            log.Debug($"Stopping {LocalPeer}");
-
-            // Stop the listeners.
-            while (listeners.Count > 0)
-            {
-                await StopListeningAsync(listeners.Keys.First()).ConfigureAwait(false);
-            }
-
-            // Disconnect from remote peers.
-            Manager.Clear();
-            Manager.PeerDisconnected -= OnPeerDisconnected;
-
-            otherPeers.Clear();
-            listeners.Clear();
-            pendingConnections.Clear();
-            pendingRemoteConnections.Clear();
-
-            log.Debug($"Stopped {LocalPeer}");
         }
 
 
@@ -450,237 +336,37 @@ namespace PeerTalk
         ///   If already connected to the peer and is active on any address, then
         ///   the existing connection is returned.
         /// </remarks>
-        public async Task<PeerConnection> ConnectAsync(Peer peer, CancellationToken cancel = default(CancellationToken))
+        public Task<PeerConnection> ConnectAsync(Peer peer, CancellationToken cancel = default(CancellationToken))
         {
-            if (!IsRunning)
-            {
-                throw new Exception("The swarm is not running.");
-            }
-
-            // If connected and still open, then use the existing connection.
-            if (Manager.TryGet(peer, out PeerConnection conn))
-            {
-                return conn;
-            }
-
-            // Use a current connection attempt to the peer or create a new one.
-            try
-            {
-                using (var cts = CancellationTokenSource.CreateLinkedTokenSource(swarmCancellation.Token, cancel))
-                {
-                    return await pendingConnections
-                        .GetOrAdd(peer, (key) => new AsyncLazy<PeerConnection>(() => DialAsync(peer, peer.Addresses, cts.Token)))
-                        .ConfigureAwait(false);
-                }
-            }
-            catch (Exception)
-            {
-                PeerNotReachable?.Invoke(this, peer);
-                throw;
-            }
-            finally
-            {
-                pendingConnections.TryRemove(peer, out AsyncLazy<PeerConnection> _);
-            }
+            return Switchboard.ConnectAsync(peer, cancel);
         }
 
-        /// <summary>
-        ///   Create a stream to the peer that talks the specified protocol.
-        /// </summary>
-        /// <param name="peer">
-        ///   The remote peer.
-        /// </param>
-        /// <param name="protocol">
-        ///   The protocol name, such as "/foo/0.42.0".
-        /// </param>
-        /// <param name="cancel">
-        ///   Is used to stop the task.  When cancelled, the <see cref="TaskCanceledException"/> is raised.
-        /// </param>
-        /// <returns>
-        ///   A task that represents the asynchronous operation. The task's result
-        ///   is the new <see cref="Stream"/> to the <paramref name="peer"/>.
-        /// </returns>
-        /// <remarks>
-        ///   <para>
-        ///   When finished, the caller must <see cref="Stream.Dispose()"/> the
-        ///   new stream.
-        ///   </para>
-        /// </remarks>
-        public async Task<Stream> DialAsync(Peer peer, string protocol, CancellationToken cancel = default(CancellationToken))
+            /// <summary>
+            ///   Create a stream to the peer that talks the specified protocol.
+            /// </summary>
+            /// <param name="peer">
+            ///   The remote peer.
+            /// </param>
+            /// <param name="protocol">
+            ///   The protocol name, such as "/foo/0.42.0".
+            /// </param>
+            /// <param name="cancel">
+            ///   Is used to stop the task.  When cancelled, the <see cref="TaskCanceledException"/> is raised.
+            /// </param>
+            /// <returns>
+            ///   A task that represents the asynchronous operation. The task's result
+            ///   is the new <see cref="Stream"/> to the <paramref name="peer"/>.
+            /// </returns>
+            /// <remarks>
+            ///   <para>
+            ///   When finished, the caller must <see cref="Stream.Dispose()"/> the
+            ///   new stream.
+            ///   </para>
+            /// </remarks>
+            public Task<Stream> DialAsync(Peer peer, string protocol, CancellationToken cancel = default(CancellationToken))
         {
-            peer = RegisterPeer(peer.Id);
+            return Switchboard.DialAsync(peer, protocol, cancel);
 
-            // Get a connection and then a muxer to the peer.
-            var connection = await ConnectAsync(peer, cancel).ConfigureAwait(false);
-            var muxer = await connection.MuxerEstablished.Task.ConfigureAwait(false);
-
-            // Create a new stream for the peer protocol.
-            var stream = await muxer.CreateStreamAsync(protocol).ConfigureAwait(false);
-            try
-            {
-                await connection.EstablishProtocolAsync("/multistream/", stream).ConfigureAwait(false);
-
-                await Message.WriteAsync(protocol, stream, cancel).ConfigureAwait(false);
-                var result = await Message.ReadStringAsync(stream, cancel).ConfigureAwait(false);
-                if (result != protocol)
-                {
-                    throw new Exception($"Protocol '{protocol}' not supported by '{peer}'.");
-                }
-
-                return stream;
-            }
-            catch (Exception)
-            {
-                stream.Dispose();
-                throw;
-            }
-        }
-
-        /// <summary>
-        ///   Establish a duplex stream between the local and remote peer.
-        /// </summary>
-        /// <param name="remote"></param>
-        /// <param name="addrs"></param>
-        /// <param name="cancel"></param>
-        /// <returns></returns>
-        async Task<PeerConnection> DialAsync(Peer remote, IEnumerable<MultiAddress> addrs, CancellationToken cancel)
-        {
-            log.Debug($"Dialing {remote}");
-
-            if (remote == LocalPeer)
-            {
-                throw new Exception("Cannot dial self.");
-            }
-
-            // If no addresses, then ask peer routing.
-            if (Router != null && addrs.Count() == 0)
-            {
-                var found = await Router.FindPeerAsync(remote.Id, cancel).ConfigureAwait(false);
-                addrs = found.Addresses;
-                remote.Addresses = addrs;
-            }
-
-            // Get the addresses we can use to dial the remote.  Filter
-            // out any addresses (ip and port) we are listening on.
-            var blackList = listeners.Keys
-                .Select(a => a.WithoutPeerId())
-                .ToArray();
-            var possibleAddresses = (await Task.WhenAll(addrs.Select(a => a.ResolveAsync(cancel))).ConfigureAwait(false))
-                .SelectMany(a => a)
-                .Where(a => !blackList.Contains(a.WithoutPeerId()))
-                .Select(a => a.WithPeerId(remote.Id))
-                .Distinct()
-                .ToArray();
-            if (possibleAddresses.Length == 0)
-            {
-                throw new Exception($"{remote} has no known or reachable address.");
-            }
-
-            // Try the various addresses in parallel.  The first one to complete wins.
-            PeerConnection connection = null;
-            try
-            {
-                using (var timeout = new CancellationTokenSource(TransportConnectionTimeout))
-                using (var cts = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token, cancel))
-                {
-                    var attempts = possibleAddresses
-                        .Select(a => DialAsync(remote, a, cts.Token));
-                    connection = await TaskHelper.WhenAnyResultAsync(attempts, cts.Token).ConfigureAwait(false);
-                    cts.Cancel(); // stop other dialing tasks.
-                }
-            }
-            catch (Exception e)
-            {
-                var attemped = string.Join(", ", possibleAddresses.Select(a => a.ToString()));
-                log.Trace($"Cannot dial {attemped}");
-                throw new Exception($"Cannot dial {remote}.", e);
-            }
-
-            // Do the connection handshake.
-            try
-            {
-                MountProtocols(connection);
-                IEncryptionProtocol[] security = null;
-                lock (protocols)
-                {
-                    security = protocols.OfType<IEncryptionProtocol>().ToArray();
-                }
-                await connection.InitiateAsync(security, cancel).ConfigureAwait(false);
-                await connection.MuxerEstablished.Task.ConfigureAwait(false);
-                Identify1 identify = null;
-                lock (protocols)
-                {
-                    identify = protocols.OfType<Identify1>().First();
-                }
-                await identify.GetRemotePeerAsync(connection, cancel).ConfigureAwait(false);
-            }
-            catch (Exception)
-            {
-                connection.Dispose();
-                throw;
-            }
-
-            var actual = Manager.Add(connection);
-            if (actual == connection)
-            {
-                ConnectionEstablished?.Invoke(this, connection);
-            }
-
-            return actual;
-
-        }
-
-        async Task<PeerConnection> DialAsync(Peer remote, MultiAddress addr, CancellationToken cancel)
-        {
-            // TODO: HACK: Currenty only the ipfs/p2p is supported.
-            // short circuit to make life faster.
-            if (addr.Protocols.Count != 3
-                || !(addr.Protocols[2].Name == "ipfs" || addr.Protocols[2].Name == "p2p"))
-            {
-                throw new Exception($"Cannnot dial; unknown protocol in '{addr}'.");
-            }
-
-            // Establish the transport stream.
-            Stream stream = null;
-            foreach (var protocol in addr.Protocols)
-            {
-                cancel.ThrowIfCancellationRequested();
-                if (TransportRegistry.Transports.TryGetValue(protocol.Name, out Func<IPeerTransport> transport))
-                {
-                    stream = await transport().ConnectAsync(addr, cancel).ConfigureAwait(false);
-                    if (cancel.IsCancellationRequested)
-                    {
-                        stream?.Dispose();
-                        continue;
-                    }
-                    break;
-                }
-            }
-            if (stream == null)
-            {
-                throw new Exception("Missing a known transport protocol name.");
-            }
-
-            // Build the connection.
-            var connection = new PeerConnection
-            {
-                IsIncoming = false,
-                LocalPeer = LocalPeer,
-                // TODO: LocalAddress
-                LocalPeerKey = LocalPeerKey,
-                RemotePeer = remote,
-                RemoteAddress = addr,
-                Stream = stream
-            };
-
-            // Are we communicating to a private network?
-            if (NetworkProtector != null)
-            {
-                connection.Stream = await NetworkProtector.ProtectAsync(connection).ConfigureAwait(false);
-            }
-
-
-            return connection;
         }
 
         /// <summary>
@@ -701,245 +387,16 @@ namespace PeerTalk
         /// </remarks>
         public Task DisconnectAsync(MultiAddress address, CancellationToken cancel = default(CancellationToken))
         {
-            Manager.Remove(address.PeerId);
-            return Task.CompletedTask;
+            return Switchboard.DisconnectAsync(address, cancel);
         }
 
         /// <summary>
-        ///   Start listening on the specified <see cref="MultiAddress"/>.
+        /// Number of current connections
         /// </summary>
-        /// <param name="address">
-        ///   Typically "/ip4/0.0.0.0/tcp/4001" or "/ip6/::/tcp/4001".
-        /// </param>
-        /// <returns>
-        ///   A task that represents the asynchronous operation.  The task's result
-        ///   is a <see cref="MultiAddress"/> than can be used by another peer
-        ///   to connect to tis peer.
-        /// </returns>
-        /// <exception cref="Exception">
-        ///   Already listening on <paramref name="address"/>.
-        /// </exception>
-        /// <exception cref="ArgumentException">
-        ///   <paramref name="address"/> is missing a transport protocol (such as tcp or udp).
-        /// </exception>
-        /// <remarks>
-        ///   Allows other peers to <see cref="ConnectAsync(MultiAddress, CancellationToken)">connect</see>
-        ///   to the <paramref name="address"/>.
-        ///   <para>
-        ///   The <see cref="Peer.Addresses"/> of the <see cref="LocalPeer"/> are updated.  If the <paramref name="address"/> refers to
-        ///   any IP address ("/ip4/0.0.0.0" or "/ip6/::") then all network interfaces addresses
-        ///   are added.  If the port is zero (as in "/ip6/::/tcp/0"), then the peer addresses contains the actual port number
-        ///   that was assigned.
-        ///   </para>
-        /// </remarks>
-        public Task<MultiAddress> StartListeningAsync(MultiAddress address)
+        /// <returns></returns>
+        public int ConnectionCount()
         {
-            var cancel = new CancellationTokenSource();
-
-            if (!listeners.TryAdd(address, cancel))
-            {
-                throw new Exception($"Already listening on '{address}'.");
-            }
-
-            // Start a listener for the transport
-            var didSomething = false;
-            foreach (var protocol in address.Protocols)
-            {
-                if (TransportRegistry.Transports.TryGetValue(protocol.Name, out Func<IPeerTransport> transport))
-                {
-                    address = transport().Listen(address, OnRemoteConnect, cancel.Token);
-                    listeners.TryAdd(address, cancel);
-                    didSomething = true;
-                    break;
-                }
-            }
-            if (!didSomething)
-            {
-                throw new ArgumentException($"Missing a transport protocol name '{address}'.", "address");
-            }
-
-            var result = new MultiAddress($"{address}/ipfs/{LocalPeer.Id}");
-
-            // Get the actual IP address(es).
-            IEnumerable<MultiAddress> addresses = new List<MultiAddress>();
-            var ips = NetworkInterface.GetAllNetworkInterfaces()
-                // It appears that the loopback adapter is not UP on Ubuntu 14.04.5 LTS
-                .Where(nic => nic.OperationalStatus == OperationalStatus.Up
-                    || nic.NetworkInterfaceType == NetworkInterfaceType.Loopback)
-                .SelectMany(nic => nic.GetIPProperties().UnicastAddresses);
-            if (result.ToString().StartsWith("/ip4/0.0.0.0/"))
-            {
-                addresses = ips
-                    .Where(ip => ip.Address.AddressFamily == AddressFamily.InterNetwork)
-                    .Select(ip =>
-                    {
-                        return new MultiAddress(result.ToString().Replace("0.0.0.0", ip.Address.ToString()));
-                    })
-                    .ToArray();
-            }
-            else if (result.ToString().StartsWith("/ip6/::/"))
-            {
-                addresses = ips
-                    .Where(ip => ip.Address.AddressFamily == AddressFamily.InterNetworkV6)
-                    .Select(ip =>
-                    {
-                        return new MultiAddress(result.ToString().Replace("::", ip.Address.ToString()));
-                    })
-                    .ToArray();
-            }
-            else
-            {
-                addresses = new MultiAddress[] { result };
-            }
-            if (addresses.Count() == 0)
-            {
-                var msg = "Cannot determine address(es) for " + result;
-                foreach (var ip in ips)
-                {
-                    msg += " nic-ip: " + ip.Address.ToString();
-                }
-                cancel.Cancel();
-                throw new Exception(msg);
-            }
-
-            // Add actual addresses to listeners and local peer addresses.
-            foreach (var a in addresses)
-            {
-                log.Debug($"Listening on {a}");
-                listeners.TryAdd(a, cancel);
-            }
-            LocalPeer.Addresses = LocalPeer
-                .Addresses
-                .Union(addresses)
-                .ToArray();
-
-            ListenerEstablished?.Invoke(this, LocalPeer);
-            return Task.FromResult(addresses.First());
-        }
-
-#pragma warning disable VSTHRD100 // Avoid async void methods
-        /// <summary>
-        ///   Called when a remote peer is connecting to the local peer.
-        /// </summary>
-        /// <param name="stream">
-        ///   The stream to the remote peer.
-        /// </param>
-        /// <param name="local">
-        ///   The local peer's address.
-        /// </param>
-        /// <param name="remote">
-        ///   The remote peer's address.
-        /// </param>
-        /// <remarks>
-        ///   Establishes the protocols of the connection.  Any exception is simply
-        ///   logged as warning.
-        /// </remarks>
-        async void OnRemoteConnect(Stream stream, MultiAddress local, MultiAddress remote)
-#pragma warning restore VSTHRD100 // Avoid async void methods
-        {
-            if (!IsRunning)
-            {
-                try
-                {
-                    stream.Dispose();
-                }
-                catch (Exception)
-                {
-                    // eat it.
-                }
-                return;
-            }
-
-            // If the remote is already trying to establish a connection, then we
-            // can just refuse this one.
-            if (!pendingRemoteConnections.TryAdd(remote, null))
-            {
-                log.Debug($"Duplicate remote connection from {remote}");
-                try
-                {
-                    stream.Dispose();
-                }
-                catch (Exception)
-                {
-                    // eat it.
-                }
-                return;
-            }
-
-            try
-            {
-                if (log.IsDebugEnabled)
-                {
-                    log.Debug($"remote connect from {remote}");
-                }
-
-                // TODO: Check the policies
-
-                var connection = new PeerConnection
-                {
-                    IsIncoming = true,
-                    LocalPeer = LocalPeer,
-                    LocalAddress = local,
-                    LocalPeerKey = LocalPeerKey,
-                    RemoteAddress = remote,
-                    Stream = stream
-                };
-
-                // Are we communicating to a private network?
-                if (NetworkProtector != null)
-                {
-                    connection.Stream = await NetworkProtector.ProtectAsync(connection).ConfigureAwait(false);
-                }
-
-                // Mount the protocols.
-                MountProtocols(connection);
-
-                // Start the handshake
-                // TODO: Isn't connection cancel token required.
-                _ = connection.ReadMessagesAsync(default(CancellationToken));
-
-                // Wait for security to be established.
-                await connection.SecurityEstablished.Task.ConfigureAwait(false);
-                // TODO: Maybe connection.LocalPeerKey = null;
-
-                // Wait for the handshake to complete.
-                var muxer = await connection.MuxerEstablished.Task;
-
-                // Need details on the remote peer.
-                Identify1 identify = null;
-                lock (protocols)
-                {
-                    identify = protocols.OfType<Identify1>().First();
-                }
-                connection.RemotePeer = await identify.GetRemotePeerAsync(connection, default(CancellationToken)).ConfigureAwait(false);
-
-                connection.RemotePeer = RegisterPeer(connection.RemotePeer.Id);
-                connection.RemoteAddress = new MultiAddress($"{remote}/ipfs/{connection.RemotePeer.Id}");
-                var actual = Manager.Add(connection);
-                if (actual == connection)
-                {
-                    ConnectionEstablished?.Invoke(this, connection);
-                }
-            }
-            catch (Exception e)
-            {
-                if (log.IsDebugEnabled)
-                {
-                    log.Debug($"remote connect from {remote} failed: {e.Message}");
-                }
-                try
-                {
-                    stream.Dispose();
-                }
-                catch (Exception)
-                {
-                    // eat it.
-                }
-            }
-            finally
-            {
-                pendingRemoteConnections.TryRemove(remote, out object _);
-            }
+            return Switchboard.ConnectionCount();
         }
 
         /// <summary>
@@ -950,10 +407,7 @@ namespace PeerTalk
         /// </param>
         public void AddProtocol(IPeerProtocol protocol)
         {
-            lock (protocols)
-            {
-                protocols.Add(protocol);
-            }
+            otherPeers.AddProtocol(protocol);
         }
 
         /// <summary>
@@ -964,72 +418,7 @@ namespace PeerTalk
         /// </param>
         public void RemoveProtocol(IPeerProtocol protocol)
         {
-            lock (protocols)
-            {
-                protocols.Remove(protocol);
-            }
-        }
-
-        void MountProtocols(PeerConnection connection)
-        {
-            lock (protocols)
-            {
-                connection.AddProtocols(protocols);
-            }
-        }
-
-        /// <summary>
-        ///   Stop listening on the specified <see cref="MultiAddress"/>.
-        /// </summary>
-        /// <param name="address"></param>
-        /// <returns>
-        ///   A task that represents the asynchronous operation.
-        /// </returns>
-        /// <remarks>
-        ///   Allows other peers to <see cref="ConnectAsync(MultiAddress, CancellationToken)">connect</see>
-        ///   to the <paramref name="address"/>.
-        ///   <para>
-        ///   The addresses of the <see cref="LocalPeer"/> are updated.
-        ///   </para>
-        /// </remarks>
-        public async Task StopListeningAsync(MultiAddress address)
-        {
-            if (!listeners.TryRemove(address, out CancellationTokenSource listener))
-            {
-                return;
-            }
-
-            try
-            {
-                if (!listener.IsCancellationRequested)
-                {
-                    listener.Cancel(false);
-                }
-
-                // Remove any local peer address that depend on the cancellation token.
-                var others = listeners
-                    .Where(l => l.Value == listener)
-                    .Select(l => l.Key)
-                    .ToArray();
-
-                LocalPeer.Addresses = LocalPeer.Addresses
-                    .Where(a => a != address)
-                    .Where(a => !others.Contains(a))
-                    .ToArray();
-
-                foreach (var other in others)
-                {
-                    listeners.TryRemove(other, out CancellationTokenSource _);
-                }
-
-                // Give some time away, so that cancel can run
-                // TODO: Would be nice to make this deterministic.
-                await Task.Delay(TimeSpan.FromMilliseconds(100)).ConfigureAwait(false);
-            }
-            catch (Exception e)
-            {
-                log.Error("stop listening failed", e);
-            }
+            otherPeers.RemoveProtocol(protocol);
         }
     }
 }

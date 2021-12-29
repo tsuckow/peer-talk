@@ -94,8 +94,8 @@ namespace PeerTalk
         async void OnPeerDiscovered(object sender, Peer peer)
 #pragma warning restore VSTHRD100 // Avoid async void methods
         {
-            var n = swarm.Manager.Connections.Count() + pendingConnects;
-            if (swarm.IsRunning && n < MinConnections)
+            var n = swarm.ConnectionCount() + pendingConnects;
+            if (n < MinConnections)
             {
                 Interlocked.Increment(ref pendingConnects);
                 log.Debug($"Dialing new {peer}");
@@ -132,8 +132,8 @@ namespace PeerTalk
         async void OnPeerDisconnected(object sender, Peer disconnectedPeer)
 #pragma warning restore VSTHRD100 // Avoid async void methods
         {
-            var n = swarm.Manager.Connections.Count() + pendingConnects;
-            if (!swarm.IsRunning || n >= MinConnections)
+            var n = swarm.ConnectionCount() + pendingConnects;
+            if (n >= MinConnections)
                 return;
 
             // Find a random peer to connect with.
