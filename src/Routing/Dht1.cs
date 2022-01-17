@@ -5,17 +5,11 @@ using PeerTalk.Protocols;
 using ProtoBuf;
 using Semver;
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Alethic.Kademlia;
-using Microsoft.Extensions.Options;
-using Microsoft.Extensions.Logging.Abstractions;
-using Alethic.Kademlia.InMemory;
 
 namespace PeerTalk.Routing
 {
@@ -33,14 +27,9 @@ namespace PeerTalk.Routing
         public SemVersion Version { get; } = new SemVersion(1, 0);
 
         /// <summary>
-        ///  Routing information on peers.
-        /// </summary>
-        public RoutingTable RoutingTable;
-
-        /// <summary>
         ///   Peers that can provide some content.
         /// </summary>
-        public ContentRouter ContentRouter;
+        private ContentRouter ContentRouter = new ContentRouter();
 
         /// <summary>
         ///   The number of closer peers to return.
@@ -66,8 +55,13 @@ namespace PeerTalk.Routing
         internal PeerList OtherPeers;
         internal Switchboard Switchboard;
 
-        private KFixedTableRouter<KNodeId256> Router;
-        private KRequestHandler<KNodeId256> Handler;
+        private RoutingTable table;
+        //private RoutingTable privateTable;
+        //private IKRouter<KNodeId256> Router;
+        //private KRequestHandler<KNodeId256> Handler;
+
+
+        private DhtRequester requester;
 
         /// <summary>
         ///  Instantiates a DHT
@@ -80,27 +74,29 @@ namespace PeerTalk.Routing
             LocalPeer = localPeer;
             OtherPeers = otherPeers;
             Switchboard = switchboard;
-            var hostOptions = new KHostOptions<KNodeId256> {
-                NodeId = new KNodeId256(localPeer.Id.Digest),
-                NetworkId = 0,
-                Endpoints = new Uri[] { }
-            };
-            var logger = NullLogger.Instance;
-            var host = new KHost<KNodeId256>(Options.Create(hostOptions), logger);
-            var invokerPolicy = new KInvokerPolicy<KNodeId256>(logger);
-            var invoker = new KInvoker<KNodeId256>(host, invokerPolicy);
-            Router = new KFixedTableRouter<KNodeId256>(Options.Create(new KFixedTableRouterOptions { }), host, invoker, logger);
-            var lookup = new KLookup<KNodeId256>(host, Router, invoker, logger);
-            var store = new KInMemoryStore<KNodeId256>(host, Router, invoker, lookup, logger);
-            Handler = new KRequestHandler<KNodeId256>(host, Router, store, logger);
+            table = new RoutingTable(localPeer);
+            //var hostOptions = new KHostOptions<KNodeId256> {
+            //    NodeId = new KNodeId256(localPeer.Id.Digest),
+            //    NetworkId = 0,
+            //    Endpoints = new Uri[] { }
+            //};
+            //var logger = NullLogger.Instance;
+            //var host = new KHost<KNodeId256>(Options.Create(hostOptions), logger);
+            //var invokerPolicy = new KInvokerPolicy<KNodeId256>(logger);
+            //var invoker = new KInvoker<KNodeId256>(host, invokerPolicy);
+            //Router = new KFixedTableRouter<KNodeId256>(Options.Create(new KFixedTableRouterOptions { }), host, invoker, logger);
+            //var lookup = new KLookup<KNodeId256>(host, Router, invoker, logger);
+            //var store = new KInMemoryStore<KNodeId256>(host, Router, invoker, lookup, logger);
+            //Handler = new KRequestHandler<KNodeId256>(host, Router, store, logger);
+            
             //KConnector?
             //KRefresher?
             //KStaticDiscovery?
 
-            //foreach (var peer in Swarm.KnownPeers)
-            //{
-            //    RoutingTable.Add(peer);
-            //}
+            requester = new DhtRequester(Switchboard);
+
+            OtherPeers.PeerDiscovered += Swarm_PeerDiscovered;
+            OtherPeers.PeerRemoved += Swarm_PeerRemoved;
         }
 
         /// <inheritdoc />
@@ -121,7 +117,10 @@ namespace PeerTalk.Routing
                 switch (request.Type)
                 {
                     case MessageType.Ping:
-                        response = ProcessPing(request, response);
+                        //Deprecated
+                        log.Warn("Got a deprecated ping message");
+                        response = null;
+                        stream.Close();
                         break;
                     case MessageType.FindNode:
                         response = ProcessFindNode(request, response);
@@ -170,16 +169,28 @@ namespace PeerTalk.Routing
         /// </summary>
         void Swarm_PeerDiscovered(object sender, Peer e)
         {
-            RoutingTable.Add(e);
+            //var key = new KNodeId256(e.Id.Digest);
+            //var endpoints = e.Addresses.Select(a => new KIpfsProtocolEndpoint<KNodeId256>(a.ToString()));
+            //Router.UpdateAsync(key, endpoints);
         }
-
+        
         /// <summary>
         ///   The swarm has removed a peer, update the routing table.
         /// </summary>
         private void Swarm_PeerRemoved(object sender, Peer e)
         {
-            RoutingTable.Remove(e);
+            //var key = new KNodeId256(e.Id.Digest);
+            //var endpoints = Enumerable.Empty<IKProtocolEndpoint<KNodeId256>>();
+            table.Remove(e);
+            //Router.UpdateAsync(key, endpoints);
         }
+
+        //MultiHash toHash(KNodeId256 id)
+        //{
+        //    byte[] result = new byte[32];
+        //    //id.Write(result);
+        //    return new MultiHash(result);
+        //}
 
         /// <inheritdoc />
         public async Task<Peer> FindPeerAsync(MultiHash id, CancellationToken cancel = default(CancellationToken))
@@ -187,29 +198,70 @@ namespace PeerTalk.Routing
             // Can always find self.
             if (LocalPeer.Id == id)
                 return LocalPeer;
+            //            var key = new KNodeId256(id.Digest);
 
-            // Maybe the swarm knows about it.
-            var found = OtherPeers.Peers.FirstOrDefault(p => p.Id == id);
-            if (found != null && found.Addresses.Count() > 0)
-                return found;
+            //#if NETSTANDARD2_1_OR_GREATER
+            //            var nodes = await Router.SelectAsync(key, k: 1, cancel).Take(1).ToArrayAsync(cancel);
+            //#else
+            //            var nodes = await Router.SelectAsync(key, k: 1, cancel);
+            //#endif
 
-            // Ask our peers for information on the requested peer.
-            var dquery = new DistributedQuery
+            var nearest = table.NearestPeers(id);
+            if(!nearest.Any())
             {
-                QueryType = MessageType.FindNode,
-                QueryKey = id,
-                Dht = this,
-                AnswersNeeded = 1
-            };
-            await dquery.RunAsync(cancel).ConfigureAwait(false);
-
-            // If not found, return the closest peer.
-            if (dquery.Answers.Count() == 0)
-            {
-                return RoutingTable.NearestPeers(id).FirstOrDefault();
+                nearest = OtherPeers.Peers;
             }
 
-            return dquery.Answers.First();
+            var visited = new HashSet<MultiHash>();
+
+            //We're going to visit peers trying to get closer till we find we're going in circles.
+            while( nearest.Any() )
+            {
+                var nextPeer = nearest.First();
+                nearest = nearest.Skip(1);
+
+                if(nextPeer.Id == id)
+                {
+                    //Found It!
+
+                    log.Debug($"DHT found {id} after {visited.Count} queries");
+                    return nextPeer;
+                }
+
+                visited.Add(nextPeer.Id);
+
+                //Query the nextPeer for who it thinks is closest
+                try
+                {
+                    var closest = await requester.ClosestAddressAsync(nextPeer, id, cancel);
+                    var peers = closest.Select(p => {
+                        try
+                        {
+                            var n = OtherPeers.RegisterPeer(p.Key, out Peer registered, p.Value);
+                            if (n)
+                            {
+                                log.Debug($"DHT Learned of new peer {registered.Id}");
+                                table.Add(registered);
+                            }
+                            return registered;
+                        } catch(Exception)
+                        {
+                            //Peer is blocklisted
+                            return null;
+                        }
+                    }).Where(p => p != null);
+
+                    //Check those peers next (This list could probably be sorted by distance but we'd have to munge the id's which would be kinda expensive)
+                    nearest = peers.Where(p => !visited.Contains(p.Id)).Concat(nearest);
+                }
+                catch (Exception)
+                {
+                    continue;
+                }
+            }
+
+            log.Debug($"DHT gave up on {id} after {visited.Count} queries");
+            return null;
         }
 
         /// <inheritdoc />
@@ -231,6 +283,29 @@ namespace PeerTalk.Routing
             Action<Peer> action = null,
             CancellationToken cancel = default(CancellationToken))
         {
+            foreach (var peer in OtherPeers.Peers)
+            {
+                try
+                {
+                    //FIXME
+                    var closest = await requester.ClosestAddressAsync(peer, id.Hash, cancel);
+                    var peers = closest.Select(p => { var n = OtherPeers.RegisterPeer(p.Key, out Peer registered, p.Value); if (n)
+                        {
+                            log.Debug($"DHT Learned of new peer {registered.Id}");
+                        }
+                        return registered; });
+                    if (peers.Any())
+                    {
+                        continue;
+                        //return peers;
+                    }
+                }
+                catch (Exception)
+                {
+                    continue;
+                }
+            }
+
             var dquery = new DistributedQuery
             {
                 QueryType = MessageType.GetProviders,
@@ -292,9 +367,10 @@ namespace PeerTalk.Routing
                         }
                     }
                 };
-                var peers = RoutingTable
-                    .NearestPeers(cid.Hash)
-                    .Where(p => p != LocalPeer);   
+                var peers = Enumerable.Empty<Peer>();
+                //RoutingTable
+                //    .NearestPeers(cid.Hash)
+                //    .Where(p => p != LocalPeer);   
                 foreach (var peer in peers)
                 {
                     try
@@ -357,14 +433,10 @@ namespace PeerTalk.Routing
             }
 
             // Find the closer peers.
-            var closerPeers = new List<Peer>();
+            var closerPeers = table.NearestPeers(peerId);
             if (found != null)
             {
-                closerPeers.Add(found);
-            }
-            else
-            {
-                closerPeers.AddRange(RoutingTable.NearestPeers(peerId).Take(CloserPeerCount));
+                closerPeers = new[] { found }.Concat(closerPeers);
             }
 
             // Build the response.

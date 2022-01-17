@@ -61,16 +61,6 @@ namespace PeerTalk
         public event EventHandler<Peer> PeerDisconnected;
 
         /// <summary>
-        ///   Raised when a peer should no longer be used.
-        /// </summary>
-        /// <remarks>
-        ///   This event indicates that the peer has been removed
-        ///   from the <see cref="KnownPeers"/> and should no longer
-        ///   be used.
-        /// </remarks>
-        public event EventHandler<Peer> PeerRemoved;
-
-        /// <summary>
         ///   Raised when a peer cannot be connected to.
         /// </summary>
         public event EventHandler<Peer> PeerNotReachable;
@@ -170,6 +160,8 @@ namespace PeerTalk
 
             Switchboard.ConnectionEstablished += OnConnectionEstablished;
             Switchboard.PeerNotReachable += OnPeerNotReachable;
+
+            peerList.PeerDiscovered += (o, peer) => PeerDiscovered.Invoke(o, peer);
         }
 
         /// <summary>
@@ -233,7 +225,6 @@ namespace PeerTalk
                 {
                     log.Debug($"New peer registerd {peer}");
                 }
-                PeerDiscovered?.Invoke(this, peer);
             }
 
             return peer;
@@ -245,10 +236,6 @@ namespace PeerTalk
         /// <param name="id">
         ///   The peer to remove..
         /// </param>
-        /// <remarks>
-        ///   Remove all knowledge of the peer. The <see cref="PeerRemoved"/> event
-        ///   is raised.
-        /// </remarks>
         public bool DeregisterPeer(MultiHash id)
         {
             if (id == null)
@@ -257,12 +244,7 @@ namespace PeerTalk
             }
 
             otherPeers.RemovePeer(id, out Peer found);
-            if(found != null)
-            {
-                PeerRemoved?.Invoke(this, found);
-                return true;
-            }
-            return false;
+            return found != null;
         }
 
         /// <summary>

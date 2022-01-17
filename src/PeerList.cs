@@ -47,6 +47,22 @@ namespace PeerTalk
         /// </summary>
         public IEnumerable<Peer> Peers { get => otherPeers.Values; }
 
+
+        /// <summary>
+        ///   Raised when a new peer is discovered for the first time.
+        /// </summary>
+        public event EventHandler<Peer> PeerDiscovered;
+
+        /// <summary>
+        ///   Raised when a peer should no longer be used.
+        /// </summary>
+        /// <remarks>
+        ///   This event indicates that the peer has been removed
+        ///   and should no longer
+        ///   be used.
+        /// </remarks>
+        public event EventHandler<Peer> PeerRemoved;
+
         /// <summary>
         ///   Returns a peer instance for a given multihash, if it isn't a known peer it is registered
         ///   
@@ -90,7 +106,9 @@ namespace PeerTalk
                 (_) =>
                 {
                     isNew = true;
-                    return new Peer { Id = id, Addresses = addresses ?? Enumerable.Empty<MultiAddress>() };
+                    var newpeer = new Peer { Id = id, Addresses = addresses ?? Enumerable.Empty<MultiAddress>() };
+                    PeerDiscovered.Invoke(this, newpeer);
+                    return newpeer;
                 },
                 (_, existing) =>
                 {
@@ -131,6 +149,10 @@ namespace PeerTalk
         public void RemovePeer(MultiHash id, out Peer found)
         {
             otherPeers.TryRemove(id.ToBase58(), out found);
+            if(found != null)
+            {
+                PeerRemoved.Invoke(this, found);
+            }
         }
 
         /// <summary>

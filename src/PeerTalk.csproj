@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net461;netstandard2</TargetFrameworks>
+    <TargetFrameworks>net461;netstandard2.1</TargetFrameworks>
     <AssemblyName>PeerTalk</AssemblyName>
     <RootNamespace>PeerTalk</RootNamespace>
     <DocumentationFile>bin\$(Configuration)\$(TargetFramework)\$(AssemblyName).xml</DocumentationFile>
@@ -28,6 +28,7 @@
     <PackageIconUrl>https://github.com/ipfs/logo/blob/master/platform-icons/osx-menu-bar.png</PackageIconUrl>
     <GeneratePackageOnBuild Condition=" '$(Configuration)' == 'Release' ">true</GeneratePackageOnBuild>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+	<NoWarn>VSTHRD103</NoWarn>
   </PropertyGroup>
 
   <PropertyGroup Condition=" '$(TargetFramework)' == 'netstandard14'">
@@ -52,8 +53,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Alethic.Kademlia" Version="1.0.4" />
-    <PackageReference Include="Alethic.Kademlia.InMemory" Version="1.0.4" />
     <PackageReference Include="Ipfs.Core" Version="0.55.0" />
     <PackageReference Include="Makaretu.Dns.Multicast" Version="0.25.0" />
     <PackageReference Include="Makaretu.KBucket" Version="0.5.0" />

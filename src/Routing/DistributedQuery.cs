@@ -157,10 +157,11 @@ namespace PeerTalk.Routing
             while (!runningQuery.IsCancellationRequested && waits > 0)
             {
                 // Get the nearest peer that has not been visited.
-                var peer = Dht.RoutingTable
-                    .NearestPeers(QueryKey)
-                    .Where(p => !visited.ContainsKey(p))
-                    .FirstOrDefault();
+                Peer peer = null;
+                    //Dht.RoutingTable
+                    //.NearestPeers(QueryKey)
+                    //.Where(p => !visited.ContainsKey(p))
+                    //.FirstOrDefault();
                 if (peer == null)
                 {
                     --waits;

@@ -1,4 +1,5 @@
-﻿using Ipfs;
+﻿using Common.Logging;
+using Ipfs;
 using Makaretu.Collections;
 using System;
 using System.Collections.Concurrent;
@@ -26,6 +27,8 @@ namespace PeerTalk.Routing
     /// </summary>
     public class RoutingTable
     {
+        static ILog log = LogManager.GetLogger(typeof(RoutingTable));
+
         KBucket<RoutingPeer> Peers = new KBucket<RoutingPeer>();
 
         /// <summary>
@@ -55,6 +58,7 @@ namespace PeerTalk.Routing
             if (Peers.Remove(e.Oldest.First()))
             {
                 Peers.Add(e.Newest);
+                log.Warn("DHT naively replaced a peer in a full k-bucket");
             }
         }
 
