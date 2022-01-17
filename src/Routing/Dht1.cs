@@ -172,6 +172,7 @@ namespace PeerTalk.Routing
             //var key = new KNodeId256(e.Id.Digest);
             //var endpoints = e.Addresses.Select(a => new KIpfsProtocolEndpoint<KNodeId256>(a.ToString()));
             //Router.UpdateAsync(key, endpoints);
+            table.Add(e);
         }
         
         /// <summary>
@@ -181,8 +182,8 @@ namespace PeerTalk.Routing
         {
             //var key = new KNodeId256(e.Id.Digest);
             //var endpoints = Enumerable.Empty<IKProtocolEndpoint<KNodeId256>>();
-            table.Remove(e);
             //Router.UpdateAsync(key, endpoints);
+            table.Remove(e);
         }
 
         //MultiHash toHash(KNodeId256 id)
@@ -283,6 +284,7 @@ namespace PeerTalk.Routing
             Action<Peer> action = null,
             CancellationToken cancel = default(CancellationToken))
         {
+            //FIXME
             foreach (var peer in OtherPeers.Peers)
             {
                 try
