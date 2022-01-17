@@ -98,7 +98,7 @@ namespace PeerTalk
             if (n < MinConnections)
             {
                 Interlocked.Increment(ref pendingConnects);
-                log.Debug($"Dialing new {peer}");
+                log.Debug($"AutoDialing new {peer}");
                 try
                 {
                     await swarm.ConnectAsync(peer).ConfigureAwait(false);
@@ -149,7 +149,7 @@ namespace PeerTalk
             var peer = peers[rng.Next(peers.Count())];
 
             Interlocked.Increment(ref pendingConnects);
-            log.Debug($"Dialing {peer}");
+            log.Debug($"AutoDialing {peer}");
             try
             {
                 await swarm.ConnectAsync(peer).ConfigureAwait(false);

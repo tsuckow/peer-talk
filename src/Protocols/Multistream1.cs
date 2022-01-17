@@ -1,4 +1,5 @@
 ﻿using Common.Logging;
+using PeerTalk.Multiplex;
 using Semver;
 using System;
 using System.Collections.Generic;
@@ -35,6 +36,11 @@ namespace PeerTalk.Protocols
         public async Task ProcessMessageAsync(PeerConnection connection, Stream stream, CancellationToken cancel = default(CancellationToken))
         {
             var msg = await Message.ReadStringAsync(stream, cancel).ConfigureAwait(false);
+
+            if(stream is Substream substream)
+            {
+                substream.Name = msg;
+            }
 
             // TODO: msg == "ls"
             if (msg == "ls")

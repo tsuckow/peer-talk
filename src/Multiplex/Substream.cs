@@ -41,7 +41,7 @@ namespace PeerTalk.Multiplex
         /// <value>
         ///   Names do not need to be unique.
         /// </value>
-        internal string Name { get; private set; }
+        internal string Name { get; set; }
 
         /// <summary>
         ///   The multiplexor associated with the substream.

@@ -7,6 +7,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -305,7 +306,7 @@ namespace PeerTalk
         /// <summary>
         ///   Starts reading messages from the remote peer on the specified stream.
         /// </summary>
-        public async Task ReadMessagesAsync(Stream stream, CancellationToken cancel)
+        public async Task ReadMessagesAsync(Substream stream, CancellationToken cancel)
         {
             IPeerProtocol protocol = new Multistream1();
             try
@@ -354,6 +355,10 @@ namespace PeerTalk
                     try
                     {
                         Stream.Dispose();
+                    }
+                    catch (SocketException)
+                    {
+                        // ignore stream already closed.
                     }
                     catch (ObjectDisposedException)
                     {

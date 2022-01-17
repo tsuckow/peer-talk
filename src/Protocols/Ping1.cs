@@ -44,16 +44,23 @@ namespace PeerTalk.Protocols
         /// <inheritdoc />
         public async Task ProcessMessageAsync(PeerConnection connection, Stream stream, CancellationToken cancel = default(CancellationToken))
         {
-            while (true)
+            try
             {
-                // Read the message.
-                var request = new byte[PingSize];
-                await stream.ReadExactAsync(request, 0, PingSize, cancel).ConfigureAwait(false);
-                log.Debug($"got ping from {connection.RemotePeer}");
+                while (true)
+                {
+                    // Read the message.
+                    var request = new byte[PingSize];
+                    await stream.ReadExactAsync(request, 0, PingSize, cancel).ConfigureAwait(false);
+                    log.Debug($"got ping from {connection.RemotePeer}");
 
-                // Echo the message
-                await stream.WriteAsync(request, 0, PingSize, cancel).ConfigureAwait(false);
-                await stream.FlushAsync(cancel).ConfigureAwait(false);
+                    // Echo the message
+                    await stream.WriteAsync(request, 0, PingSize, cancel).ConfigureAwait(false);
+                    await stream.FlushAsync(cancel).ConfigureAwait(false);
+                }
+            }
+            catch(EndOfStreamException)
+            {
+                stream.Close();
             }
         }
 

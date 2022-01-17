@@ -223,8 +223,24 @@ namespace PeerTalk.SecureCommunication.Noise
             {
                 transport.Dispose();
                 stream.Dispose();
+
+                try {
+                    try
+                    {
+                        Flush();
+                    }
+                    finally
+                    {
+                        stream.Close();
+                    }
+                }
+                finally
+                {
+                    stream = null;
+                }
+
                 outStream.Dispose();
-            }
+                }
             base.Dispose(disposing);
         }
     }

@@ -55,6 +55,7 @@ namespace PeerTalk.Protocols
 
             ProtoBuf.Serializer.SerializeWithLengthPrefix<Identify>(stream, res, PrefixStyle.Base128);
             await stream.FlushAsync().ConfigureAwait(false);
+            stream.Close();
         }
 
         /// <summary>
