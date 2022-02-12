@@ -82,6 +82,25 @@ namespace PeerTalk
         }
 
         /// <summary>
+        ///  Returns a peer instance for a given multihash, if it isn't a known peer it is registered
+        ///   
+        ///  Resolving the local peer (ourselves) is permitted
+        ///  
+        ///  If the id is blocked, returns null;
+        /// </summary>
+        public Peer ResolvePeerOrNull(MultiHash id)
+        {
+            try
+            {
+                return ResolvePeer(id);
+            }
+            catch(Exception)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
         ///   Locates or creates a peer, merging addresses
         ///   
         ///   Registering the local peer (ourselves) is not permitted

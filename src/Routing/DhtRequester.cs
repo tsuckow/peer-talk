@@ -11,6 +11,12 @@ using System.Threading.Tasks;
 
 namespace PeerTalk.Routing
 {
+    internal class DhtCloserProviders
+    {
+        public IDictionary<MultiHash, IEnumerable<MultiAddress>> Closer = ImmutableDictionary.Create<MultiHash, IEnumerable<MultiAddress>>();
+        public IDictionary<MultiHash, IEnumerable<MultiAddress>> Providers = ImmutableDictionary.Create<MultiHash, IEnumerable<MultiAddress>>();
+    }
+
     internal class DhtRequester
     {
         static ILog log = LogManager.GetLogger("PeerTalk.Routing.DhtRequester");
@@ -39,11 +45,35 @@ namespace PeerTalk.Routing
         {
             try
             {
-                var result = await MessagePeerAsync(peer, new DhtMessage { Type = MessageType.FindNode, Key = id.Digest }, token);
+                var result = await MessagePeerAsync(peer, new DhtMessage { Type = MessageType.FindNode, Key = id.ToArray(), }, token);
                 return result.CloserPeers.ToDictionary(p => p.MultiHash, p => p.MultiAddresses);
-            } catch(Exception)
+            }
+            catch (Exception)
             {
                 return ImmutableDictionary.Create<MultiHash, IEnumerable<MultiAddress>>();
+            }
+        }
+
+        public async Task<DhtCloserProviders> RequestProvidersAsync(Peer peer, Cid id, CancellationToken token = default)
+        {
+            try
+            {
+                var result = await MessagePeerAsync(peer, new DhtMessage { Type = MessageType.GetProviders, Key = id.Hash.ToArray() }, token);
+                var ret = new DhtCloserProviders();
+                if (result.CloserPeers != null)
+                {
+                    ret.Closer = result.CloserPeers.ToDictionary(p => p.MultiHash, p => p.MultiAddresses);
+                }
+                if (result.ProviderPeers != null)
+                {
+                    ret.Providers = result.ProviderPeers.ToDictionary(p => p.MultiHash, p => p.MultiAddresses);
+                }
+
+                return ret;
+            }
+            catch (Exception)
+            {
+                return new DhtCloserProviders();
             }
         }
 
@@ -55,7 +85,7 @@ namespace PeerTalk.Routing
             try
             {
                 using (var timeout = new CancellationTokenSource(askTime))
-                using (var cts = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token,token))
+                using (var cts = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token, token))
                 using (var stream = await Switchboard.DialAsync(peer, PROTOCOL, cts.Token).ConfigureAwait(false))
                 {
                     // Send the KAD query and get a response.
@@ -65,7 +95,7 @@ namespace PeerTalk.Routing
 
                     var time = DateTime.Now - start;
                     log.Debug($"DHT OK {peer} ({time.TotalMilliseconds} ms)");
-                    
+
                     return response;
                 }
             }
@@ -79,34 +109,6 @@ namespace PeerTalk.Routing
             finally
             {
                 askCount.Release();
-            }
-        }
-
-        void ProcessProviders(DhtPeerMessage[] providers)
-        {
-            if (providers == null)
-                return;
-
-            foreach (var provider in providers)
-            {
-                try
-                {
-                    log.Info($"Provider: {provider}");
-                }
-                catch (Exception) //Fixme RegisterPeer should throw a custom exception when not allowed
-                {
-                    continue;
-                }
-            }
-        }
-
-        void ProcessCloserPeers(DhtPeerMessage[] closerPeers)
-        {
-            if (closerPeers == null)
-                return;
-            foreach (var closer in closerPeers)
-            {
-                    log.Info($"Closer: {closer}");
             }
         }
     }

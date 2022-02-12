@@ -199,13 +199,6 @@ namespace PeerTalk.Routing
             // Can always find self.
             if (LocalPeer.Id == id)
                 return LocalPeer;
-            //            var key = new KNodeId256(id.Digest);
-
-            //#if NETSTANDARD2_1_OR_GREATER
-            //            var nodes = await Router.SelectAsync(key, k: 1, cancel).Take(1).ToArrayAsync(cancel);
-            //#else
-            //            var nodes = await Router.SelectAsync(key, k: 1, cancel);
-            //#endif
 
             var nearest = table.NearestPeers(id);
             if(!nearest.Any())
@@ -284,23 +277,88 @@ namespace PeerTalk.Routing
             Action<Peer> action = null,
             CancellationToken cancel = default(CancellationToken))
         {
-            //FIXME
-            foreach (var peer in OtherPeers.Peers)
+            var nearest = table.NearestPeers(id.Hash);
+            if (!nearest.Any())
             {
+                nearest = OtherPeers.Peers;
+            }
+
+            var visited = new HashSet<MultiHash>();
+
+            var providers = ContentRouter
+                .Get(id)
+                .Select(OtherPeers.ResolvePeerOrNull).Where(p => p != null);
+            foreach (var provider in providers)
+            {
+                action.Invoke(provider);
+            }
+
+            cancel.Register(() =>
+            log.Error("FindProvidersAsync canceled")
+            );
+
+            //We're going to visit peers trying to get closer till we find we're going in circles.
+            while (nearest.Any() && providers.Count() < limit)
+            {
+                var nextPeer = nearest.First();
+                nearest = nearest.Skip(1);
+
+                visited.Add(nextPeer.Id);
+
+                //Query the nextPeer for who it thinks is closest
                 try
                 {
-                    //FIXME
-                    var closest = await requester.ClosestAddressAsync(peer, id.Hash, cancel);
-                    var peers = closest.Select(p => { var n = OtherPeers.RegisterPeer(p.Key, out Peer registered, p.Value); if (n)
-                        {
-                            log.Debug($"DHT Learned of new peer {registered.Id}");
-                        }
-                        return registered; });
-                    if (peers.Any())
+                    var start = DateTime.Now;
+                    var result = await requester.RequestProvidersAsync(nextPeer, id, cancel);
+                    var end = DateTime.Now;
+                    var d = end.Subtract(start);
+                    if(d.TotalSeconds > 20)
                     {
-                        continue;
-                        //return peers;
+                        log.Warn($"RequestProvidersAsync took {d.TotalSeconds} seconds");
                     }
+
+                    foreach (var p in result.Providers)
+                    {
+                        try
+                        {
+                            var n = OtherPeers.RegisterPeer(p.Key, out Peer registered, p.Value);
+                            if (n)
+                            {
+                                log.Debug($"DHT Learned of new peer {registered.Id}");
+                                table.Add(registered);
+                            }
+
+
+                            providers = providers.Concat(new[] { registered });
+
+                            action.Invoke(registered);
+                        }
+                        catch (Exception)
+                        {
+                            //Peer is blocklisted
+                        }
+                    }
+
+                    var peers = result.Closer.Select(p => {
+                        try
+                        {
+                            var n = OtherPeers.RegisterPeer(p.Key, out Peer registered, p.Value);
+                            if (n)
+                            {
+                                log.Debug($"DHT Learned of new peer {registered.Id}");
+                                table.Add(registered);
+                            }
+                            return registered;
+                        }
+                        catch (Exception)
+                        {
+                            //Peer is blocklisted
+                            return null;
+                        }
+                    }).Where(p => p != null);
+
+                    //Check those peers next (This list could probably be sorted by distance but we'd have to munge the id's which would be kinda expensive)
+                    nearest = peers.Where(p => !visited.Contains(p.Id)).Concat(nearest);
                 }
                 catch (Exception)
                 {
@@ -308,34 +366,12 @@ namespace PeerTalk.Routing
                 }
             }
 
-            var dquery = new DistributedQuery
+            if(!providers.Any())
             {
-                QueryType = MessageType.GetProviders,
-                QueryKey = id.Hash,
-                Dht = this,
-                AnswersNeeded = limit,
-            };
-            if (action != null)
-            {
-                dquery.AnswerObtained += (s, e) => action.Invoke(e);
+                log.Warn($"Failed to locate {id} after {visited.Count} visits");
             }
 
-            // Add any providers that we already know about.
-            var providers = ContentRouter
-                .Get(id)
-                .Select(OtherPeers.ResolvePeer);
-            foreach (var provider in providers)
-            {
-                dquery.AddAnswer(provider);
-            }
-
-            // Ask our peers for more providers.
-            if (limit > dquery.Answers.Count())
-            {
-                await dquery.RunAsync(cancel).ConfigureAwait(false);
-            }
-
-            return dquery.Answers.Take(limit);
+            return providers.Take(limit);            
         }
 
         /// <summary>
@@ -393,17 +429,6 @@ namespace PeerTalk.Routing
                     }
                 }
             });
-        }
-
-        /// <summary>
-        ///   Process a ping request.
-        /// </summary>
-        /// <remarks>
-        ///   Simply return the <paramref name="request"/>.
-        /// </remarks>
-        DhtMessage ProcessPing(DhtMessage request, DhtMessage response)
-        {
-            return request;
         }
 
         /// <summary>
