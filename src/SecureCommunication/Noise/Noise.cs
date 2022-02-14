@@ -25,10 +25,21 @@ namespace PeerTalk.SecureCommunication.Noise
         /// <inheritdoc />
         public SemVersion Version { get; } = new SemVersion(1, 0);
 
+        private PeerList peerList;
+
         /// <inheritdoc />
         public override string ToString()
         {
             return $"/{Name}";
+        }
+
+        /// <summary>
+        /// Creates a noise protocol encryptor
+        /// </summary>
+        /// <param name="peerList">PeerList for instantiating peers</param>
+        public Noise(PeerList peerList)
+        {
+            this.peerList = peerList;
         }
 
         private static byte[] payloadSigPrefix = System.Text.Encoding.UTF8.GetBytes("noise-libp2p-static-key:");

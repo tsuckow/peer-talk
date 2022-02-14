@@ -93,7 +93,7 @@ namespace PeerTalk.Routing
             //KRefresher?
             //KStaticDiscovery?
 
-            requester = new DhtRequester(Switchboard);
+            requester = new DhtRequester(this, Switchboard);
 
             OtherPeers.PeerDiscovered += Swarm_PeerDiscovered;
             OtherPeers.PeerRemoved += Swarm_PeerRemoved;

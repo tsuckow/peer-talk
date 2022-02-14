@@ -187,47 +187,16 @@ namespace PeerTalk
             IEnumerable<IEncryptionProtocol> securityProtocols,
             CancellationToken cancel = default(CancellationToken))
         {
-            await EstablishProtocolAsync("/multistream/", cancel).ConfigureAwait(false);
+            var multistream = new Multistream1();
+            var security = await multistream.NegotiateProtocolAsync(this, Stream, securityProtocols, cancel);
+            await security.EncryptAsync(this, cancel).ConfigureAwait(false);
 
-            // Find the first security protocol that is also supported by the remote.
-            var exceptions = new List<Exception>();
-            foreach (var protocol in securityProtocols)
-            {
-                try
-                {
-                    await EstablishProtocolAsync(protocol.ToString(), cancel).ConfigureAwait(false);
-                }
-                catch (Exception e)
-                {
-                    exceptions.Add(e);
-                    continue;
-                }
-
-                await protocol.EncryptAsync(this, cancel).ConfigureAwait(false);
-                break;
-            }
             if (!SecurityEstablished.Task.IsCompleted)
-                throw new AggregateException("Could not establish a secure connection.", exceptions);
+                throw new Exception("Could not establish a secure connection.");
 
-            await EstablishProtocolAsync("/multistream/", cancel).ConfigureAwait(false);
-            await EstablishProtocolAsync("/mplex/", cancel).ConfigureAwait(false);
-
-            var muxer = new Muxer(Stream, this);
-            muxer.SubstreamCreated += (s, e) => _ = ReadMessagesAsync(e, CancellationToken.None);
-            this.MuxerEstablished.SetResult(muxer);
-
-            _ = muxer.ProcessRequestsAsync();
-        }
-
-        /// <summary>
-        ///   TODO:
-        /// </summary>
-        /// <param name="name"></param>
-        /// <param name="cancel"></param>
-        /// <returns></returns>
-        public Task EstablishProtocolAsync(string name, CancellationToken cancel)
-        {
-            return EstablishProtocolAsync(name, Stream, cancel);
+            var multiplexer = await multistream.NegotiateProtocolAsync(this, Stream, new Mplex67(), cancel);
+            // Prepare the multiplexer on the stream and let it go forever or till canceled.
+            _ = multiplexer.ProcessMessageAsync(this, Stream, cancel);
         }
 
         /// <summary>

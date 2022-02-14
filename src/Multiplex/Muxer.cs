@@ -124,16 +124,22 @@ namespace PeerTalk.Multiplex
             log.Debug($"Closing stream #{stream.Id}:{stream.Name} w/ {Connection.RemotePeer.Id}");
             _ = Task.Run(async () =>
             {
-                using (await AcquireWriteAccessAsync().ConfigureAwait(false))
+                try
                 {
-                    var header = new Header
+                    using (await AcquireWriteAccessAsync().ConfigureAwait(false))
                     {
-                        StreamId = stream.Id.Id,
-                        PacketType = stream.Id.Initiator ? PacketType.CloseInitiator : PacketType.CloseReceiver
-                    };
-                    await header.WriteAsync(Channel, cancel).ConfigureAwait(false);
-                    Channel.WriteByte(0); // length
-                    await Channel.FlushAsync().ConfigureAwait(false);
+                        var header = new Header
+                        {
+                            StreamId = stream.Id.Id,
+                            PacketType = stream.Id.Initiator ? PacketType.CloseInitiator : PacketType.CloseReceiver
+                        };
+                        await header.WriteAsync(Channel, cancel).ConfigureAwait(false);
+                        Channel.WriteByte(0); // length
+                        await Channel.FlushAsync().ConfigureAwait(false);
+                    }
+                } catch (Exception ex)
+                {
+                    log.Error($"Could not cleanly close multiplexed stream #{stream.Id}:{stream.Name} w/ {Connection.RemotePeer.Id}", ex);
                 }
             });
         }

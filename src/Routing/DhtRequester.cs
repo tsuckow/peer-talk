@@ -21,8 +21,6 @@ namespace PeerTalk.Routing
     {
         static ILog log = LogManager.GetLogger("PeerTalk.Routing.DhtRequester");
 
-        const string PROTOCOL = "/ipfs/kad/1.0.0";
-
         /// <summary>
         ///   The maximum number of peers that can be queried at one time
         ///   for all distributed queries.
@@ -34,10 +32,12 @@ namespace PeerTalk.Routing
         /// </summary>
         static readonly TimeSpan askTime = TimeSpan.FromSeconds(10);
 
-        Switchboard Switchboard;
+        private Switchboard Switchboard;
+        private Dht1 Protocol;
 
-        internal DhtRequester(Switchboard switchboard)
+        internal DhtRequester(Dht1 protocol, Switchboard switchboard)
         {
+            Protocol = protocol;
             Switchboard = switchboard;
         }
 
@@ -86,7 +86,7 @@ namespace PeerTalk.Routing
             {
                 using (var timeout = new CancellationTokenSource(askTime))
                 using (var cts = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token, token))
-                using (var stream = await Switchboard.DialAsync(peer, PROTOCOL, cts.Token).ConfigureAwait(false))
+                using (var stream = await Switchboard.DialAsync(peer, Protocol, cts.Token).ConfigureAwait(false))
                 {
                     // Send the KAD query and get a response.
                     ProtoBuf.Serializer.SerializeWithLengthPrefix(stream, queryMessage, PrefixStyle.Base128);

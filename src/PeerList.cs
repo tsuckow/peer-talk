@@ -23,6 +23,14 @@ namespace PeerTalk
         public PeerList(Peer localPeer)
         {
             LocalPeer = localPeer;
+            protocols = new List<IPeerProtocol>
+            {
+                new Multistream1(),
+                new SecureCommunication.Noise.Noise(this),
+                new SecureCommunication.Secio1(),
+                new Identify1(),
+                new Mplex67()
+            };
         }
 
         private readonly Peer LocalPeer;
@@ -188,14 +196,7 @@ namespace PeerTalk
         /// <remarks>
         ///   Use sychronized access, e.g. <code>lock (protocols) { ... }</code>.
         /// </remarks>
-        List<IPeerProtocol> protocols = new List<IPeerProtocol>
-        {
-            new Multistream1(),
-            new SecureCommunication.Noise.Noise(),
-            new SecureCommunication.Secio1(),
-            new Identify1(),
-            new Mplex67()
-        };
+        List<IPeerProtocol> protocols;
 
         /// <summary>
         ///   Gets the registered encryption protocols

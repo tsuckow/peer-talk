@@ -78,12 +78,9 @@ namespace PeerTalk.Protocols
             }
 
             // Read the remote peer identify info.
-            using (var stream = await muxer.CreateStreamAsync("id", cancel).ConfigureAwait(false))
-            {
-                await connection.EstablishProtocolAsync("/multistream/", stream, cancel).ConfigureAwait(false);
-                await connection.EstablishProtocolAsync("/ipfs/id/", stream, cancel).ConfigureAwait(false);
-                await UpdateRemotePeerAsync(remote, stream, cancel).ConfigureAwait(false);
-            }
+            var info = await IdentifyAsync(connection, cancel).ConfigureAwait(false);
+            
+            UpdateRemotePeer(remote, info);
 
             // It should always contain the address we used for connections, so
             // that NAT translations are maintained.
@@ -100,17 +97,24 @@ namespace PeerTalk.Protocols
             return remote;
         }
 
+        private async Task<Identify> IdentifyAsync(PeerConnection connection, CancellationToken cancel)
+        {
+            var muxer = await connection.MuxerEstablished.Task.ConfigureAwait(false);
+            using (var stream = await muxer.CreateStreamAsync("id", cancel).ConfigureAwait(false))
+            {
+                await new Multistream1().NegotiateProtocolAsync(connection, stream, this, cancel);
+                return await ProtoBufHelper.ReadMessageAsync<Identify>(stream, cancel).ConfigureAwait(false);
+            }
+        }
+
         /// <summary>
         ///   Read the identify message and update the peer information.
         /// </summary>
         /// <param name="remote"></param>
-        /// <param name="stream"></param>
-        /// <param name="cancel"></param>
+        /// <param name="info">The response from the identify protocol</param>
         /// <returns></returns>
-        public async Task UpdateRemotePeerAsync(Peer remote, Stream stream, CancellationToken cancel)
+        private void UpdateRemotePeer(Peer remote, Identify info)
         {
-            var info = await ProtoBufHelper.ReadMessageAsync<Identify>(stream, cancel).ConfigureAwait(false);
-
             remote.AgentVersion = info.AgentVersion;
             remote.ProtocolVersion = info.ProtocolVersion;
             if (info.PublicKey == null || info.PublicKey.Length == 0)

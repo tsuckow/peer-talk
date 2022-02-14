@@ -183,7 +183,7 @@ namespace PeerTalk.Routing
                 {
                     using (var timeout = new CancellationTokenSource(askTime))
                     using (var cts = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token, runningQuery.Token))
-                    using (var stream = await Dht.Switchboard.DialAsync(peer, Dht.ToString(), cts.Token).ConfigureAwait(false))
+                    using (var stream = await Dht.Switchboard.DialAsync(peer, Dht, cts.Token).ConfigureAwait(false))
                     {
                         // Send the KAD query and get a response.
                         ProtoBuf.Serializer.SerializeWithLengthPrefix(stream, queryMessage, PrefixStyle.Base128);

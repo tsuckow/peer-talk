@@ -227,7 +227,7 @@ namespace PeerTalk.PubSub
         {
             try
             {
-                using (var stream = await Swarm.DialAsync(peer, this.ToString(), cancel).ConfigureAwait(false))
+                using (var stream = await Swarm.DialAsync(peer, this, cancel).ConfigureAwait(false))
                 {
                     await stream.WriteAsync(message, 0, message.Length, cancel).ConfigureAwait(false);
                     await stream.FlushAsync(cancel).ConfigureAwait(false);

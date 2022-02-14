@@ -463,7 +463,7 @@ namespace PeerTalk
                 // TODO: Maybe connection.LocalPeerKey = null;
 
                 // Wait for the handshake to complete.
-                var muxer = await connection.MuxerEstablished.Task;
+                _ = await connection.MuxerEstablished.Task.ConfigureAwait(false);
 
                 // Need details on the remote peer.
                 Identify1 identify = OtherPeers.IdentifyProtocol;
@@ -500,7 +500,6 @@ namespace PeerTalk
             }
         }
 
-
         /// <summary>
         ///   Create a stream to the peer that talks the specified protocol.
         /// </summary>
@@ -508,7 +507,7 @@ namespace PeerTalk
         ///   The remote peer.
         /// </param>
         /// <param name="protocol">
-        ///   The protocol name, such as "/foo/0.42.0".
+        ///   The protocol to negotiate.
         /// </param>
         /// <param name="cancel">
         ///   Is used to stop the task.  When cancelled, the <see cref="TaskCanceledException"/> is raised.
@@ -523,7 +522,34 @@ namespace PeerTalk
         ///   new stream.
         ///   </para>
         /// </remarks>
-        public async Task<Stream> DialAsync(Peer peer, string protocol, CancellationToken cancel = default(CancellationToken))
+        public async Task<ProtocolStream<Protocol>> DialAsync<Protocol>(Peer peer, Protocol protocol, CancellationToken cancel = default(CancellationToken)) where Protocol : IPeerProtocol
+        {
+            return await DialAsync(peer, new[] { protocol }, cancel);
+        }
+
+        /// <summary>
+        ///   Create a stream to the peer that talks the specified protocol.
+        /// </summary>
+        /// <param name="peer">
+        ///   The remote peer.
+        /// </param>
+        /// <param name="protocols">
+        ///   The protocols to negotiate.
+        /// </param>
+        /// <param name="cancel">
+        ///   Is used to stop the task.  When cancelled, the <see cref="TaskCanceledException"/> is raised.
+        /// </param>
+        /// <returns>
+        ///   A task that represents the asynchronous operation. The task's result
+        ///   is the new <see cref="Stream"/> to the <paramref name="peer"/>.
+        /// </returns>
+        /// <remarks>
+        ///   <para>
+        ///   When finished, the caller must <see cref="Stream.Dispose()"/> the
+        ///   new stream.
+        ///   </para>
+        /// </remarks>
+        public async Task<ProtocolStream<Protocol>> DialAsync<Protocol>(Peer peer, IEnumerable<Protocol> protocols, CancellationToken cancel = default(CancellationToken)) where Protocol : IPeerProtocol
         {
             peer = OtherPeers.ResolvePeer(peer.Id);
 
@@ -532,19 +558,12 @@ namespace PeerTalk
             var muxer = await connection.MuxerEstablished.Task.ConfigureAwait(false);
 
             // Create a new stream for the peer protocol.
-            var stream = await muxer.CreateStreamAsync(protocol).ConfigureAwait(false);
+            var stream = await muxer.CreateStreamAsync("Dialing").ConfigureAwait(false);
             try
             {
-                await connection.EstablishProtocolAsync("/multistream/", stream).ConfigureAwait(false);
-
-                await Message.WriteAsync(protocol, stream, cancel).ConfigureAwait(false);
-                var result = await Message.ReadStringAsync(stream, cancel).ConfigureAwait(false);
-                if (result != protocol)
-                {
-                    throw new Exception($"Protocol '{protocol}' not supported by '{peer}'.");
-                }
-
-                return stream;
+                var protocol = await new Multistream1().NegotiateProtocolAsync(connection, stream, protocols, cancel);
+                stream.Name = protocol.ToString();
+                return ProtocolStream.Wrap(stream, protocol);
             }
             catch (Exception)
             {

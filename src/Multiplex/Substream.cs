@@ -161,7 +161,7 @@ namespace PeerTalk.Multiplex
         /// <inheritdoc />
         public override void Flush()
         {
-#pragma warning disable VSTHRD002 
+ #pragma warning disable VSTHRD002
             FlushAsync().GetAwaiter().GetResult();
 #pragma warning restore VSTHRD002 
         }

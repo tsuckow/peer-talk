@@ -138,7 +138,7 @@ namespace PeerTalk.Protocols
             };
             var totalTime = TimeSpan.Zero;
 
-            using (var stream = await Swarm.DialAsync(peer, this.ToString(), cancel))
+            using (var stream = await Swarm.DialAsync(peer, this, cancel))
             {
                 for (int i = 0; i < count; ++i)
                 {
