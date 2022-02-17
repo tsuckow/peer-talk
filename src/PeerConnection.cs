@@ -333,6 +333,10 @@ namespace PeerTalk
                     {
                         // ignore stream already closed.
                     }
+                    catch (IOException)
+                    {
+                        // ignore stream ended already
+                    }
                     catch (Exception e)
                     {
                         log.Warn($"Failed to close connection to {RemoteAddress}", e);

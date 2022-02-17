@@ -133,9 +133,12 @@ namespace PeerTalk.Multiplex
                             StreamId = stream.Id.Id,
                             PacketType = stream.Id.Initiator ? PacketType.CloseInitiator : PacketType.CloseReceiver
                         };
-                        await header.WriteAsync(Channel, cancel).ConfigureAwait(false);
-                        Channel.WriteByte(0); // length
-                        await Channel.FlushAsync().ConfigureAwait(false);
+                        if (Channel != null)
+                        {
+                            await header.WriteAsync(Channel, cancel).ConfigureAwait(false);
+                            Channel.WriteByte(0); // length
+                            await Channel.FlushAsync().ConfigureAwait(false);
+                        }
                     }
                 } catch (Exception ex)
                 {
@@ -268,9 +271,15 @@ namespace PeerTalk.Multiplex
 
             // Some of the tests do not pass a connection.
             if (Connection != null)
+            {
                 Connection.Dispose();
+                Connection = null;
+            }
             else if (Channel != null)
+            {
                 Channel.Dispose();
+            }
+            Channel = null;
 
             // Dispose of all the substreams.
             var streams = Substreams.Values.ToArray();

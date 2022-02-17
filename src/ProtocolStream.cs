@@ -1,5 +1,8 @@
 ﻿using PeerTalk.Protocols;
+using System;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace PeerTalk
 {
@@ -50,6 +53,19 @@ namespace PeerTalk
         public override void Flush()
         {
             Stream.Flush();
+        }
+
+        /// <inheritdoc />
+        public override async Task FlushAsync(CancellationToken cancel)
+        {
+            try
+            {
+                await Stream.FlushAsync(cancel);
+            } catch (Exception ex)
+            {
+                _ = ex;
+                throw;
+            }
         }
 
         /// <inheritdoc />

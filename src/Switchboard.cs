@@ -637,8 +637,9 @@ namespace PeerTalk
                 await identify.GetRemotePeerAsync(connection, cancel).ConfigureAwait(false);
                 //FIXME WHY is the above discarded
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                log.Error($"Failed to handshake with {remote.Id}", ex);
                 connection.Dispose();
                 throw;
             }

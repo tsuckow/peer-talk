@@ -231,6 +231,9 @@ namespace PeerTalk.Routing
                     var peers = closest.Select(p => {
                         try
                         {
+                            if(p.Value.Any(addr => addr.ToString().StartsWith("/ip4/127.0.0.1/"))) {
+                                log.Warn($"DHT result for {p.Key} includes localhost");
+                            }
                             var n = OtherPeers.RegisterPeer(p.Key, out Peer registered, p.Value);
                             if (n)
                             {
