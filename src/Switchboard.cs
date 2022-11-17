@@ -567,6 +567,7 @@ namespace PeerTalk
             }
             catch (Exception)
             {
+                stream.Name = "Dialing Failed for " + protocols.Count();
                 stream.Dispose();
                 throw;
             }
